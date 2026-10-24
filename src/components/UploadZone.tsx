@@ -22,6 +22,9 @@ import {
   Check,
   RefreshCw,
   ArrowRight,
+  ChevronDown,
+  ChevronUp,
+  Sliders,
 } from 'lucide-react';
 import { VideoProbeData } from '@/shared/types';
 
@@ -35,6 +38,7 @@ interface UploadZoneProps {
     isDirectLocal?: boolean;
   }) => void;
   onReset?: () => void;
+  onProceed?: () => void;
 }
 
 interface LocalVideoItem {
@@ -47,9 +51,10 @@ interface LocalVideoItem {
 
 const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB per chunk
 
-export function UploadZone({ onUploadComplete, onReset }: UploadZoneProps) {
+export function UploadZone({ onUploadComplete, onReset, onProceed }: UploadZoneProps) {
   // Mode: 'local' (0-wait, 0-storage direct path) or 'chunked' (traditional upload)
   const [uploadMode, setUploadMode] = useState<'local' | 'chunked'>('local');
+  const [showTechDetails, setShowTechDetails] = useState<boolean>(false);
 
   // Local File selection state
   const [localPathInput, setLocalPathInput] = useState<string>('');
@@ -378,85 +383,112 @@ export function UploadZone({ onUploadComplete, onReset }: UploadZoneProps) {
             </p>
           </div>
 
-          {/* Normalized Metadata Inspection Cards */}
-          <div className="md:col-span-7 grid grid-cols-2 sm:grid-cols-3 gap-3">
-            <div className="bg-[#F0F7FF] p-3 rounded-xl border border-[#90CAF9]/60">
-              <p className="text-[10px] uppercase font-bold text-slate-500 flex items-center gap-1">
-                <Maximize className="w-3 h-3 text-[#2196F3]" />
-                Display Size
-              </p>
-              <p className="text-sm font-bold text-[#0D47A1] mt-1">
-                {probe ? `${probe.displayWidth}x${probe.displayHeight}` : 'Probing...'}
-              </p>
-              <p className="text-[10px] text-slate-500 font-mono">
-                {probe?.rotation ? `Rotated ${probe.rotation}°` : '0° Orientation'}
-              </p>
+          {/* Creator-Friendly Facts & Video Stats */}
+          <div className="md:col-span-7 flex flex-col justify-between gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="bg-[#F0F7FF] p-3.5 rounded-xl border border-[#90CAF9]/60">
+                <p className="text-[10px] uppercase font-bold text-slate-500 flex items-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5 text-[#0288D1]" />
+                  Duration
+                </p>
+                <p className="text-base font-extrabold text-[#0D47A1] mt-1">
+                  {probe ? `${Math.floor(probe.duration / 60)}m ${Math.round(probe.duration % 60)}s` : 'N/A'}
+                </p>
+                <p className="text-[10px] text-slate-500 font-mono mt-0.5">
+                  {probe ? `${probe.duration.toFixed(1)}s total` : ''}
+                </p>
+              </div>
+
+              <div className="bg-[#F0F7FF] p-3.5 rounded-xl border border-[#90CAF9]/60">
+                <p className="text-[10px] uppercase font-bold text-slate-500 flex items-center gap-1.5">
+                  <Maximize className="w-3.5 h-3.5 text-[#2196F3]" />
+                  Resolution
+                </p>
+                <p className="text-base font-extrabold text-[#0D47A1] mt-1">
+                  {probe ? `${probe.displayWidth}x${probe.displayHeight}` : 'Probing...'}
+                </p>
+                <p className="text-[10px] text-slate-500 font-medium mt-0.5">
+                  {probe
+                    ? probe.displayWidth > probe.displayHeight
+                      ? '16:9 Landscape'
+                      : probe.displayWidth < probe.displayHeight
+                      ? '9:16 Vertical'
+                      : '1:1 Square'
+                    : ''}
+                </p>
+              </div>
+
+              <div className="bg-[#F0F7FF] p-3.5 rounded-xl border border-[#90CAF9]/60">
+                <p className="text-[10px] uppercase font-bold text-slate-500 flex items-center gap-1.5">
+                  <HardDrive className="w-3.5 h-3.5 text-indigo-600" />
+                  File Size
+                </p>
+                <p className="text-base font-extrabold text-[#0D47A1] mt-1">
+                  {(uploadedData.sizeBytes / (1024 * 1024)).toFixed(1)} MB
+                </p>
+                <p className="text-[10px] text-emerald-700 font-semibold mt-0.5">
+                  Ready to slice
+                </p>
+              </div>
             </div>
 
-            <div className="bg-[#F0F7FF] p-3 rounded-xl border border-[#90CAF9]/60">
-              <p className="text-[10px] uppercase font-bold text-slate-500 flex items-center gap-1">
-                <Clock className="w-3 h-3 text-[#0288D1]" />
-                Duration
-              </p>
-              <p className="text-sm font-bold text-[#0D47A1] mt-1">
-                {probe ? `${probe.duration}s` : 'N/A'}
-              </p>
-              <p className="text-[10px] text-slate-500">
-                {probe ? `${Math.floor(probe.duration / 60)}m ${Math.round(probe.duration % 60)}s` : ''}
-              </p>
+            {/* Collapsible Technical Video Specs */}
+            <div className="rounded-xl border border-[#90CAF9]/60 bg-[#F8FAFC] overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setShowTechDetails(!showTechDetails)}
+                className="w-full flex items-center justify-between px-3.5 py-2.5 text-left text-xs font-bold text-[#0D47A1] hover:bg-[#F0F7FF] transition-colors"
+              >
+                <div className="flex items-center gap-2">
+                  <Sliders className="w-3.5 h-3.5 text-[#2196F3]" />
+                  <span>Technical Stream Specs</span>
+                  <span className="text-[10px] font-normal text-slate-500">
+                    (Codec, Framerate, Audio Channels)
+                  </span>
+                </div>
+                <ChevronDown
+                  className={`w-3.5 h-3.5 text-slate-500 transition-transform duration-200 ${
+                    showTechDetails ? 'rotate-180' : ''
+                  }`}
+                />
+              </button>
+
+              {showTechDetails && (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 p-3 pt-1 border-t border-[#90CAF9]/40 bg-white text-xs">
+                  <div>
+                    <span className="text-[10px] uppercase font-bold text-slate-400 block">Codec</span>
+                    <span className="font-mono font-bold text-[#0D47A1] uppercase">{probe?.videoCodec || 'H.264'}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] uppercase font-bold text-slate-400 block">Framerate</span>
+                    <span className="font-mono font-bold text-[#0D47A1]">{probe ? `${probe.fps} fps` : 'N/A'}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] uppercase font-bold text-slate-400 block">Audio</span>
+                    <span className="font-mono font-bold text-[#0D47A1]">
+                      {probe?.hasAudio ? `${probe.audioCodec?.toUpperCase()} (${probe.audioChannels}ch)` : 'Silent'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] uppercase font-bold text-slate-400 block">Color</span>
+                    <span className="font-mono font-bold text-[#0D47A1]">
+                      {probe?.isHDR ? 'HDR / BT.2020' : 'SDR / Rec.709'}
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
 
-            <div className="bg-[#F0F7FF] p-3 rounded-xl border border-[#90CAF9]/60">
-              <p className="text-[10px] uppercase font-bold text-slate-500 flex items-center gap-1">
-                <Gauge className="w-3 h-3 text-amber-600" />
-                Frame Rate
-              </p>
-              <p className="text-sm font-bold text-[#0D47A1] mt-1">
-                {probe ? `${probe.fps} fps` : 'N/A'}
-              </p>
-              <p className="text-[10px] text-slate-500">
-                {probe?.isVFR ? 'Variable (VFR)' : 'Constant (CFR)'}
-              </p>
-            </div>
-
-            <div className="bg-[#F0F7FF] p-3 rounded-xl border border-[#90CAF9]/60">
-              <p className="text-[10px] uppercase font-bold text-slate-500 flex items-center gap-1">
-                <Film className="w-3 h-3 text-indigo-600" />
-                Video Codec
-              </p>
-              <p className="text-sm font-bold text-[#0D47A1] mt-1 uppercase">
-                {probe?.videoCodec || 'H.264'}
-              </p>
-              <p className="text-[10px] text-slate-500">
-                SAR: {probe?.sampleAspectRatio || '1:1'}
-              </p>
-            </div>
-
-            <div className="bg-[#F0F7FF] p-3 rounded-xl border border-[#90CAF9]/60">
-              <p className="text-[10px] uppercase font-bold text-slate-500 flex items-center gap-1">
-                {probe?.hasAudio ? <Volume2 className="w-3 h-3 text-emerald-600" /> : <VolumeX className="w-3 h-3 text-slate-400" />}
-                Audio Track
-              </p>
-              <p className="text-sm font-bold text-[#0D47A1] mt-1">
-                {probe?.hasAudio ? `${probe.audioCodec?.toUpperCase()} (${probe.audioChannels}ch)` : 'No Audio'}
-              </p>
-              <p className="text-[10px] text-slate-500">
-                {probe?.hasAudio ? 'Sound synced' : 'Silent stream'}
-              </p>
-            </div>
-
-            <div className="bg-[#F0F7FF] p-3 rounded-xl border border-[#90CAF9]/60">
-              <p className="text-[10px] uppercase font-bold text-slate-500 flex items-center gap-1">
-                <FileVideo className="w-3 h-3 text-rose-600" />
-                Dynamic Range
-              </p>
-              <p className="text-sm font-bold text-[#0D47A1] mt-1">
-                {probe?.isHDR ? 'HDR / BT.2020' : 'SDR Standard'}
-              </p>
-              <p className="text-[10px] text-slate-500">
-                {probe?.isHDR ? 'Tone-mapped' : 'Rec.709'}
-              </p>
-            </div>
+            {/* Direct Proceed to Framing CTA */}
+            {onProceed && (
+              <button
+                onClick={onProceed}
+                className="btn-pressable flex items-center justify-center gap-2 w-full py-3 rounded-xl bg-[#2196F3] hover:bg-[#1E88E5] text-white font-bold text-xs shadow-md shadow-[#2196F3]/25 transition-all"
+              >
+                <span>Continue to Framing</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            )}
           </div>
         </div>
       </div>

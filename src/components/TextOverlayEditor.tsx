@@ -52,6 +52,7 @@ export function TextOverlayEditor({
   const [activeSlot, setActiveSlot] = useState<'top' | 'bottom'>('top');
   const [pasteModalSlot, setPasteModalSlot] = useState<'top' | 'bottom' | null>(null);
   const [multilineInput, setMultilineInput] = useState('');
+  const [showAdvancedStyling, setShowAdvancedStyling] = useState<boolean>(false);
 
   // Theme presets & Custom theme states
   const [availableThemes, setAvailableThemes] = useState<IThemePreset[]>(THEME_PRESETS);
@@ -452,187 +453,213 @@ export function TextOverlayEditor({
               </div>
             )}
 
-            {/* Typography & Styling Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 pt-2 border-t border-[#90CAF9]/40">
-              {/* Font Family */}
-              <div>
-                <label className="text-[11px] font-bold text-[#0D47A1] block mb-1">
-                  Font Family
-                </label>
-                <CustomSelect
-                  value={currentSlotConfig.fontFamily}
-                  onChange={(val) => updateSlot(activeSlot, { fontFamily: val })}
-                  size="sm"
-                  options={SUPPORTED_FONTS.map((font) => ({
-                    value: font.id,
-                    label: font.name,
-                  }))}
-                />
-              </div>
-
-              {/* Font Size */}
-              <div>
-                <div className="flex justify-between items-center mb-1">
-                  <label className="text-[11px] font-bold text-[#0D47A1]">Font Size</label>
-                  <span className="text-[11px] text-[#0D47A1] font-mono font-bold">{currentSlotConfig.fontSize}px</span>
-                </div>
-                <input
-                  type="range"
-                  min="16"
-                  max="90"
-                  value={currentSlotConfig.fontSize}
-                  onChange={(e) => updateSlot(activeSlot, { fontSize: Number(e.target.value) })}
-                  className="w-full accent-[#2196F3]"
-                />
-              </div>
-
-              {/* Font Color */}
-              <div>
-                <label className="text-[11px] font-bold text-[#0D47A1] block mb-1">
-                  Font Color
-                </label>
+            {/* Collapsible Fine-Tuning Styling & Typography Accordion */}
+            <div className="rounded-xl border border-[#90CAF9]/60 bg-[#F8FAFC] overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setShowAdvancedStyling(!showAdvancedStyling)}
+                className="w-full flex items-center justify-between px-4 py-3 text-left text-xs font-bold text-[#0D47A1] hover:bg-[#F0F7FF] transition-colors"
+              >
                 <div className="flex items-center gap-2">
-                  <input
-                    type="color"
-                    value={currentSlotConfig.fontColor}
-                    onChange={(e) => updateSlot(activeSlot, { fontColor: e.target.value })}
-                    className="w-8 h-8 rounded border-0 bg-transparent cursor-pointer"
-                  />
-                  <input
-                    type="text"
-                    value={currentSlotConfig.fontColor}
-                    onChange={(e) => updateSlot(activeSlot, { fontColor: e.target.value })}
-                    className="w-24 bg-white border border-[#90CAF9] rounded-lg px-2.5 py-1 text-xs text-[#0D47A1] font-mono font-bold"
-                  />
+                  <Sliders className="w-3.5 h-3.5 text-[#2196F3]" />
+                  <span>Customize Typography, Colors &amp; Timing</span>
+                  <span className="text-[10px] font-normal text-slate-500">
+                    ({currentSlotConfig.fontFamily} &bull; {currentSlotConfig.fontSize}px &bull; {currentSlotConfig.alignment})
+                  </span>
                 </div>
-              </div>
+                <ChevronDown
+                  className={`w-3.5 h-3.5 text-slate-500 transition-transform duration-200 ${
+                    showAdvancedStyling ? 'rotate-180' : ''
+                  }`}
+                />
+              </button>
 
-              {/* Outline Width & Color */}
-              <div>
-                <div className="flex justify-between items-center mb-1">
-                  <label className="text-[11px] font-bold text-[#0D47A1]">Outline Width</label>
-                  <span className="text-[11px] text-[#0D47A1] font-mono font-bold">{currentSlotConfig.outlineWidth}px</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="range"
-                    min="0"
-                    max="10"
-                    value={currentSlotConfig.outlineWidth}
-                    onChange={(e) => updateSlot(activeSlot, { outlineWidth: Number(e.target.value) })}
-                    className="w-full accent-[#2196F3]"
-                  />
-                  <input
-                    type="color"
-                    value={currentSlotConfig.outlineColor}
-                    onChange={(e) => updateSlot(activeSlot, { outlineColor: e.target.value })}
-                    className="w-6 h-6 rounded border-0 bg-transparent cursor-pointer"
-                  />
-                </div>
-              </div>
+              {showAdvancedStyling && (
+                <div className="p-4 pt-3 border-t border-[#90CAF9]/40 bg-white flex flex-col gap-4">
+                  {/* Typography & Styling Grid */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                    {/* Font Family */}
+                    <div>
+                      <label className="text-[11px] font-bold text-[#0D47A1] block mb-1">
+                        Font Family
+                      </label>
+                      <CustomSelect
+                        value={currentSlotConfig.fontFamily}
+                        onChange={(val) => updateSlot(activeSlot, { fontFamily: val })}
+                        size="sm"
+                        options={SUPPORTED_FONTS.map((font) => ({
+                          value: font.id,
+                          label: font.name,
+                        }))}
+                      />
+                    </div>
 
-              {/* Background Box */}
-              <div>
-                <div className="flex justify-between items-center mb-1">
-                  <label className="text-[11px] font-bold text-[#0D47A1]">Background Box</label>
-                  <input
-                    type="checkbox"
-                    checked={currentSlotConfig.bgBoxEnabled}
-                    onChange={(e) => updateSlot(activeSlot, { bgBoxEnabled: e.target.checked })}
-                    className="accent-[#2196F3]"
-                  />
-                </div>
-                {currentSlotConfig.bgBoxEnabled ? (
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="range"
-                      min="0.1"
-                      max="1.0"
-                      step="0.05"
-                      value={currentSlotConfig.bgBoxOpacity}
-                      onChange={(e) => updateSlot(activeSlot, { bgBoxOpacity: Number(e.target.value) })}
-                      className="w-full accent-[#2196F3]"
-                    />
-                    <input
-                      type="color"
-                      value={currentSlotConfig.bgBoxColor}
-                      onChange={(e) => updateSlot(activeSlot, { bgBoxColor: e.target.value })}
-                      className="w-6 h-6 rounded border-0 bg-transparent cursor-pointer"
-                    />
+                    {/* Font Size */}
+                    <div>
+                      <div className="flex justify-between items-center mb-1">
+                        <label className="text-[11px] font-bold text-[#0D47A1]">Font Size</label>
+                        <span className="text-[11px] text-[#0D47A1] font-mono font-bold">{currentSlotConfig.fontSize}px</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="16"
+                        max="90"
+                        value={currentSlotConfig.fontSize}
+                        onChange={(e) => updateSlot(activeSlot, { fontSize: Number(e.target.value) })}
+                        className="w-full accent-[#2196F3]"
+                      />
+                    </div>
+
+                    {/* Font Color */}
+                    <div>
+                      <label className="text-[11px] font-bold text-[#0D47A1] block mb-1">
+                        Font Color
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="color"
+                          value={currentSlotConfig.fontColor}
+                          onChange={(e) => updateSlot(activeSlot, { fontColor: e.target.value })}
+                          className="w-8 h-8 rounded border-0 bg-transparent cursor-pointer"
+                        />
+                        <input
+                          type="text"
+                          value={currentSlotConfig.fontColor}
+                          onChange={(e) => updateSlot(activeSlot, { fontColor: e.target.value })}
+                          className="w-24 bg-white border border-[#90CAF9] rounded-lg px-2.5 py-1 text-xs text-[#0D47A1] font-mono font-bold"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Outline Width & Color */}
+                    <div>
+                      <div className="flex justify-between items-center mb-1">
+                        <label className="text-[11px] font-bold text-[#0D47A1]">Outline Width</label>
+                        <span className="text-[11px] text-[#0D47A1] font-mono font-bold">{currentSlotConfig.outlineWidth}px</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="range"
+                          min="0"
+                          max="10"
+                          value={currentSlotConfig.outlineWidth}
+                          onChange={(e) => updateSlot(activeSlot, { outlineWidth: Number(e.target.value) })}
+                          className="w-full accent-[#2196F3]"
+                        />
+                        <input
+                          type="color"
+                          value={currentSlotConfig.outlineColor}
+                          onChange={(e) => updateSlot(activeSlot, { outlineColor: e.target.value })}
+                          className="w-6 h-6 rounded border-0 bg-transparent cursor-pointer"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Background Box */}
+                    <div>
+                      <div className="flex justify-between items-center mb-1">
+                        <label className="text-[11px] font-bold text-[#0D47A1]">Background Box</label>
+                        <input
+                          type="checkbox"
+                          checked={currentSlotConfig.bgBoxEnabled}
+                          onChange={(e) => updateSlot(activeSlot, { bgBoxEnabled: e.target.checked })}
+                          className="accent-[#2196F3]"
+                        />
+                      </div>
+                      {currentSlotConfig.bgBoxEnabled ? (
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="range"
+                            min="0.1"
+                            max="1.0"
+                            step="0.05"
+                            value={currentSlotConfig.bgBoxOpacity}
+                            onChange={(e) => updateSlot(activeSlot, { bgBoxOpacity: Number(e.target.value) })}
+                            className="w-full accent-[#2196F3]"
+                          />
+                          <input
+                            type="color"
+                            value={currentSlotConfig.bgBoxColor}
+                            onChange={(e) => updateSlot(activeSlot, { bgBoxColor: e.target.value })}
+                            className="w-6 h-6 rounded border-0 bg-transparent cursor-pointer"
+                          />
+                        </div>
+                      ) : (
+                        <p className="text-[11px] text-slate-400 italic">Disabled</p>
+                      )}
+                    </div>
+
+                    {/* Alignment */}
+                    <div>
+                      <label className="text-[11px] font-bold text-[#0D47A1] block mb-1">
+                        Text Alignment
+                      </label>
+                      <div className="flex items-center bg-[#F0F7FF] p-1 rounded-lg border border-[#90CAF9]/60">
+                        {(['left', 'center', 'right'] as const).map((align) => (
+                          <button
+                            key={align}
+                            onClick={() => updateSlot(activeSlot, { alignment: align })}
+                            className={`flex-1 py-1 rounded text-xs flex justify-center items-center capitalize transition-all ${
+                              currentSlotConfig.alignment === align
+                                ? 'bg-[#2196F3] text-white shadow-sm'
+                                : 'text-slate-600 hover:text-[#0D47A1]'
+                            }`}
+                          >
+                            {align === 'left' && <AlignLeft className="w-3.5 h-3.5" />}
+                            {align === 'center' && <AlignCenter className="w-3.5 h-3.5" />}
+                            {align === 'right' && <AlignRight className="w-3.5 h-3.5" />}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                   </div>
-                ) : (
-                  <p className="text-[11px] text-slate-400 italic">Disabled</p>
-                )}
-              </div>
 
-              {/* Alignment */}
-              <div>
-                <label className="text-[11px] font-bold text-[#0D47A1] block mb-1">
-                  Text Alignment
-                </label>
-                <div className="flex items-center bg-[#F0F7FF] p-1 rounded-lg border border-[#90CAF9]/60">
-                  {(['left', 'center', 'right'] as const).map((align) => (
-                    <button
-                      key={align}
-                      onClick={() => updateSlot(activeSlot, { alignment: align })}
-                      className={`flex-1 py-1 rounded text-xs flex justify-center items-center capitalize transition-all ${
-                        currentSlotConfig.alignment === align
-                          ? 'bg-[#2196F3] text-white shadow-sm'
-                          : 'text-slate-600 hover:text-[#0D47A1]'
-                      }`}
-                    >
-                      {align === 'left' && <AlignLeft className="w-3.5 h-3.5" />}
-                      {align === 'center' && <AlignCenter className="w-3.5 h-3.5" />}
-                      {align === 'right' && <AlignRight className="w-3.5 h-3.5" />}
-                    </button>
-                  ))}
+                  {/* Display Timing Controls */}
+                  <div className="pt-3 border-t border-[#90CAF9]/40 flex flex-col sm:flex-row items-center justify-between gap-4">
+                    <div className="flex items-center gap-3">
+                      <Clock className="w-4 h-4 text-[#2196F3] shrink-0" />
+                      <div>
+                        <p className="text-xs font-bold text-[#0D47A1]">Display Timing</p>
+                        <p className="text-[11px] text-slate-600 font-medium">
+                          Show for the full part duration or fade after N seconds
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-4 text-xs font-medium">
+                      <label className="flex items-center gap-1.5 cursor-pointer text-slate-700">
+                        <input
+                          type="radio"
+                          name={`timing_${activeSlot}`}
+                          checked={currentSlotConfig.durationMode === 'full'}
+                          onChange={() => updateSlot(activeSlot, { durationMode: 'full' })}
+                          className="accent-[#2196F3]"
+                        />
+                        Entire Part
+                      </label>
+                      <label className="flex items-center gap-1.5 cursor-pointer text-slate-700">
+                        <input
+                          type="radio"
+                          name={`timing_${activeSlot}`}
+                          checked={currentSlotConfig.durationMode === 'firstN'}
+                          onChange={() => updateSlot(activeSlot, { durationMode: 'firstN' })}
+                          className="accent-[#2196F3]"
+                        />
+                        First
+                        <input
+                          type="number"
+                          min="1"
+                          max="60"
+                          value={currentSlotConfig.durationSeconds}
+                          onChange={(e) => updateSlot(activeSlot, { durationSeconds: Number(e.target.value) })}
+                          className="w-12 bg-white border border-[#90CAF9] rounded px-1.5 py-0.5 text-center text-[#0D47A1] font-mono font-bold"
+                        />
+                        seconds
+                      </label>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
-
-            {/* Display Timing Controls */}
-            <div className="pt-3 border-t border-[#90CAF9]/40 flex flex-col sm:flex-row items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <Clock className="w-4 h-4 text-[#2196F3] shrink-0" />
-                <div>
-                  <p className="text-xs font-bold text-[#0D47A1]">Display Timing</p>
-                  <p className="text-[11px] text-slate-600 font-medium">
-                    Show for the full part duration or fade after N seconds
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-4 text-xs font-medium">
-                <label className="flex items-center gap-1.5 cursor-pointer text-slate-700">
-                  <input
-                    type="radio"
-                    name={`timing_${activeSlot}`}
-                    checked={currentSlotConfig.durationMode === 'full'}
-                    onChange={() => updateSlot(activeSlot, { durationMode: 'full' })}
-                    className="accent-[#2196F3]"
-                  />
-                  Entire Part
-                </label>
-                <label className="flex items-center gap-1.5 cursor-pointer text-slate-700">
-                  <input
-                    type="radio"
-                    name={`timing_${activeSlot}`}
-                    checked={currentSlotConfig.durationMode === 'firstN'}
-                    onChange={() => updateSlot(activeSlot, { durationMode: 'firstN' })}
-                    className="accent-[#2196F3]"
-                  />
-                  First
-                  <input
-                    type="number"
-                    min="1"
-                    max="60"
-                    value={currentSlotConfig.durationSeconds}
-                    onChange={(e) => updateSlot(activeSlot, { durationSeconds: Number(e.target.value) })}
-                    className="w-12 bg-white border border-[#90CAF9] rounded px-1.5 py-0.5 text-center text-[#0D47A1] font-mono font-bold"
-                  />
-                  seconds
-                </label>
-              </div>
+              )}
             </div>
           </div>
         )}

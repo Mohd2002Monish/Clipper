@@ -13,6 +13,7 @@ import {
   Cpu,
   Database,
   ArrowRight,
+  ArrowLeft,
   UploadCloud,
   Split,
   Type,
@@ -35,6 +36,7 @@ import {
   Youtube,
   Eye,
   ChevronDown,
+  ChevronUp,
   Scissors,
   Video,
   AtSign,
@@ -115,8 +117,10 @@ export default function HomePage() {
     probe?: VideoProbeData;
   } | null>(null);
 
-  // Wizard state for Steps A-F
+  // Wizard state for Steps A-E (Streamlined 5-step flow)
   const [currentStep, setCurrentStep] = useState<number>(1);
+  const [showDiagnostics, setShowDiagnostics] = useState<boolean>(false);
+  const [showSplitAdvanced, setShowSplitAdvanced] = useState<boolean>(false);
   const [selectedRatio, setSelectedRatio] = useState<'9:16' | '1:1' | '4:5' | '16:9'>('9:16');
   const [reframeMode, setReframeMode] = useState<'blur' | 'solid' | 'crop'>('blur');
   const [focalPoint, setFocalPoint] = useState<'left' | 'center' | 'right' | 'auto_face'>('auto_face');
@@ -658,92 +662,138 @@ export default function HomePage() {
         </div>
       </header>
 
-      {/* System Diagnostic Strip */}
-      <section className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-        <div className="bg-white rounded-xl p-3.5 border border-[#90CAF9]/60 shadow-sm flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-lg bg-[#E3F2FD] text-[#2196F3]">
-              <Cpu className="w-4 h-4" />
-            </div>
-            <div>
-              <p className="text-[11px] font-semibold text-slate-500">FFmpeg / Probe</p>
-              <p className="text-xs font-bold text-[#0D47A1]">
-                {health?.services.ffmpeg.available ? 'Ready & Active' : 'Not Detected'}
-              </p>
-            </div>
+      {/* Sleek System Status Ribbon */}
+      <div className="bg-white rounded-2xl p-2.5 px-4 border border-[#90CAF9]/60 shadow-xs flex items-center justify-between mb-5">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <span className="relative flex h-2.5 w-2.5">
+              <span
+                className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
+                  health?.status === 'healthy' ? 'bg-emerald-400' : 'bg-amber-400'
+                }`}
+              />
+              <span
+                className={`relative inline-flex rounded-full h-2.5 w-2.5 ${
+                  health?.status === 'healthy' ? 'bg-emerald-500' : 'bg-amber-500'
+                }`}
+              />
+            </span>
+            <span className="text-xs font-bold text-[#0D47A1]">
+              Engine {health?.status === 'healthy' ? 'Active' : 'Checking'}
+            </span>
           </div>
-          {health?.services.ffmpeg.available ? (
-            <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-          ) : (
-            <AlertTriangle className="w-4 h-4 text-amber-500" />
-          )}
+
+          <span className="text-slate-300 hidden sm:inline">&bull;</span>
+
+          <div className="hidden sm:flex items-center gap-4 text-xs text-slate-600 font-medium">
+            <span className="flex items-center gap-1.5">
+              <Cpu className="w-3.5 h-3.5 text-[#2196F3]" />
+              FFmpeg {health?.services.ffmpeg.available ? 'Ready' : 'Offline'}
+            </span>
+            <span className="flex items-center gap-1.5">
+              <Database className="w-3.5 h-3.5 text-emerald-600" />
+              Mongo &amp; Redis {health?.services.mongo.connected && health?.services.redis.connected ? 'Connected' : 'Partial'}
+            </span>
+            <span className="flex items-center gap-1.5">
+              <HardDrive className="w-3.5 h-3.5 text-indigo-600" />
+              {formatBytes(health?.services.disk.freeBytes)} Free
+            </span>
+          </div>
         </div>
 
-        <div className="bg-white rounded-xl p-3.5 border border-[#90CAF9]/60 shadow-sm flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-lg bg-emerald-50 text-emerald-600">
-              <Database className="w-4 h-4" />
-            </div>
-            <div>
-              <p className="text-[11px] font-semibold text-slate-500">Database & Queue</p>
-              <div className="flex items-center gap-2 mt-0.5">
-                <span className={`inline-flex items-center gap-1 text-[11px] font-bold ${health?.services.mongo.connected ? 'text-emerald-600' : 'text-amber-600'}`}>
-                  <span className={`w-1.5 h-1.5 rounded-full ${health?.services.mongo.connected ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-                  Mongo {health?.services.mongo.connected ? 'OK' : 'Off'}
-                </span>
-                <span className="text-slate-300">•</span>
-                <span className={`inline-flex items-center gap-1 text-[11px] font-bold ${health?.services.redis.connected ? 'text-emerald-600' : 'text-amber-600'}`}>
-                  <span className={`w-1.5 h-1.5 rounded-full ${health?.services.redis.connected ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-                  Redis {health?.services.redis.connected ? 'OK' : 'Off'}
-                </span>
-              </div>
-            </div>
-          </div>
-          {health?.services.mongo.connected && health?.services.redis.connected ? (
-            <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-          ) : (
-            <AlertTriangle className="w-4 h-4 text-amber-500" />
-          )}
-        </div>
-
-        <div className="bg-white rounded-xl p-3.5 border border-[#90CAF9]/60 shadow-sm flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-lg bg-[#E3F2FD] text-[#0288D1]">
-              <HardDrive className="w-4 h-4" />
-            </div>
-            <div>
-              <p className="text-[11px] font-semibold text-slate-500">Working Storage</p>
-              <p className="text-xs font-bold text-[#0D47A1]">
-                {formatBytes(health?.services.disk.freeBytes)} Free
-              </p>
-            </div>
-          </div>
+        <div className="flex items-center gap-2">
           <button
             onClick={handleCleanStorage}
             disabled={isCleaningStorage}
-            title="Clean temporary files, upload cache and sessions"
+            title="Clean temporary files and cache"
             className="btn-pressable flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#E3F2FD] hover:bg-[#90CAF9]/30 text-[#0D47A1] border border-[#90CAF9] text-xs font-semibold transition-all disabled:opacity-50"
           >
             <Trash2 className={`w-3 h-3 ${isCleaningStorage ? 'animate-spin' : ''}`} />
-            <span>{isCleaningStorage ? 'Cleaning...' : 'Clean'}</span>
+            <span>{isCleaningStorage ? 'Cleaning...' : 'Clean Cache'}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowDiagnostics(!showDiagnostics)}
+            className="p-1 rounded-lg text-slate-400 hover:text-[#0D47A1] hover:bg-[#F0F7FF] transition-all"
+            title="Toggle system diagnostic details"
+          >
+            <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${showDiagnostics ? 'rotate-180' : ''}`} />
           </button>
         </div>
+      </div>
 
-        <div className="bg-white rounded-xl p-3.5 border border-[#90CAF9]/60 shadow-sm flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-lg bg-indigo-50 text-indigo-600">
-              <FolderSync className="w-4 h-4" />
+      {/* Expandable Diagnostic Cards */}
+      {showDiagnostics && (
+        <section className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5 animate-in fade-in duration-150">
+          <div className="bg-white rounded-xl p-3 border border-[#90CAF9]/60 shadow-xs flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="p-1.5 rounded-lg bg-[#E3F2FD] text-[#2196F3]">
+                <Cpu className="w-4 h-4" />
+              </div>
+              <div>
+                <p className="text-[10px] font-semibold text-slate-500">FFmpeg Engine</p>
+                <p className="text-xs font-bold text-[#0D47A1]">
+                  {health?.services.ffmpeg.available ? 'Ready & Active' : 'Not Detected'}
+                </p>
+              </div>
             </div>
-            <div>
-              <p className="text-[11px] font-semibold text-slate-500">Google Drive</p>
-              <p className="text-xs font-bold text-[#0D47A1]">
-                {health?.services.googleDrive.configured ? 'Configured' : 'Local Fallback'}
-              </p>
-            </div>
+            {health?.services.ffmpeg.available ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+            ) : (
+              <AlertTriangle className="w-4 h-4 text-amber-500" />
+            )}
           </div>
-          <Info className="w-4 h-4 text-slate-400" />
-        </div>
-      </section>
+
+          <div className="bg-white rounded-xl p-3 border border-[#90CAF9]/60 shadow-xs flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="p-1.5 rounded-lg bg-emerald-50 text-emerald-600">
+                <Database className="w-4 h-4" />
+              </div>
+              <div>
+                <p className="text-[10px] font-semibold text-slate-500">Mongo &amp; Redis</p>
+                <p className="text-xs font-bold text-[#0D47A1]">
+                  {health?.services.mongo.connected && health?.services.redis.connected ? 'All Connected' : 'Partial'}
+                </p>
+              </div>
+            </div>
+            {health?.services.mongo.connected && health?.services.redis.connected ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+            ) : (
+              <AlertTriangle className="w-4 h-4 text-amber-500" />
+            )}
+          </div>
+
+          <div className="bg-white rounded-xl p-3 border border-[#90CAF9]/60 shadow-xs flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="p-1.5 rounded-lg bg-[#E3F2FD] text-[#0288D1]">
+                <HardDrive className="w-4 h-4" />
+              </div>
+              <div>
+                <p className="text-[10px] font-semibold text-slate-500">Working Disk</p>
+                <p className="text-xs font-bold text-[#0D47A1]">
+                  {formatBytes(health?.services.disk.freeBytes)} Available
+                </p>
+              </div>
+            </div>
+            <HardDrive className="w-4 h-4 text-slate-400" />
+          </div>
+
+          <div className="bg-white rounded-xl p-3 border border-[#90CAF9]/60 shadow-xs flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="p-1.5 rounded-lg bg-indigo-50 text-indigo-600">
+                <FolderSync className="w-4 h-4" />
+              </div>
+              <div>
+                <p className="text-[10px] font-semibold text-slate-500">Google Drive</p>
+                <p className="text-xs font-bold text-[#0D47A1]">
+                  {health?.services.googleDrive.configured ? 'Connected' : 'Local Fallback'}
+                </p>
+              </div>
+            </div>
+            <Info className="w-4 h-4 text-slate-400" />
+          </div>
+        </section>
+      )}
 
       {/* Storage Clean Notification Banner */}
       {storageCleanMessage && (
@@ -761,94 +811,14 @@ export default function HomePage() {
       {/* Main Tab Views */}
       {activeTab === 'new-job' && (
         <main className="flex-1 flex flex-col gap-6">
-          {/* Beginner-Friendly Quick Presets Toolbar */}
-          <div className="bg-white rounded-2xl p-4 border border-[#90CAF9]/70 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <div className="p-1.5 rounded-lg bg-[#E3F2FD] text-[#2196F3]">
-                <Sparkles className="w-4 h-4" />
-              </div>
-              <div>
-                <span className="text-xs font-bold text-[#0D47A1] block">Quick Start Presets</span>
-                <span className="text-[11px] text-slate-500">1-click setup tailored for social platforms:</span>
-              </div>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                onClick={() => {
-                  setSelectedRatio('9:16');
-                  setSplitMode('fixed');
-                  setFixedLength(60);
-                  setReframeMode('blur');
-                }}
-                className={`btn-pressable flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all ${
-                  selectedRatio === '9:16' && fixedLength === 60
-                    ? 'bg-[#2196F3] text-white border-[#2196F3] shadow-sm'
-                    : 'bg-[#E3F2FD] text-[#0D47A1] border-[#90CAF9] hover:bg-[#90CAF9]/40'
-                }`}
-              >
-                <Smartphone className="w-3.5 h-3.5 shrink-0" />
-                <span>Reels & TikTok (9:16 &bull; 60s)</span>
-              </button>
-              <button
-                onClick={() => {
-                  setSelectedRatio('9:16');
-                  setSplitMode('fixed');
-                  setFixedLength(30);
-                  setReframeMode('blur');
-                }}
-                className={`btn-pressable flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all ${
-                  selectedRatio === '9:16' && fixedLength === 30
-                    ? 'bg-[#2196F3] text-white border-[#2196F3] shadow-sm'
-                    : 'bg-[#E3F2FD] text-[#0D47A1] border-[#90CAF9] hover:bg-[#90CAF9]/40'
-                }`}
-              >
-                <Zap className="w-3.5 h-3.5 shrink-0" />
-                <span>YouTube Shorts (9:16 &bull; 30s)</span>
-              </button>
-              <button
-                onClick={() => {
-                  setSelectedRatio('1:1');
-                  setSplitMode('fixed');
-                  setFixedLength(60);
-                  setReframeMode('solid');
-                }}
-                className={`btn-pressable flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all ${
-                  selectedRatio === '1:1'
-                    ? 'bg-[#2196F3] text-white border-[#2196F3] shadow-sm'
-                    : 'bg-[#E3F2FD] text-[#0D47A1] border-[#90CAF9] hover:bg-[#90CAF9]/40'
-                }`}
-              >
-                <Square className="w-3.5 h-3.5 shrink-0" />
-                <span>Square Feed (1:1 &bull; 60s)</span>
-              </button>
-              <button
-                onClick={() => {
-                  setSelectedRatio('16:9');
-                  setSplitMode('fixed');
-                  setFixedLength(300);
-                  setReframeMode('crop');
-                }}
-                className={`btn-pressable flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all ${
-                  selectedRatio === '16:9'
-                    ? 'bg-[#2196F3] text-white border-[#2196F3] shadow-sm'
-                    : 'bg-[#E3F2FD] text-[#0D47A1] border-[#90CAF9] hover:bg-[#90CAF9]/40'
-                }`}
-              >
-                <Tv className="w-3.5 h-3.5 shrink-0" />
-                <span>Full Video (16:9)</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Step Progress Tracker */}
-          <div className="bg-white rounded-2xl p-3 border border-[#90CAF9]/60 shadow-sm flex items-center justify-between overflow-x-auto gap-2">
+          {/* Streamlined Step Progress Tracker */}
+          <div className="bg-white rounded-2xl p-2.5 border border-[#90CAF9]/60 shadow-xs flex items-center justify-between overflow-x-auto gap-2">
             {[
-              { num: 1, title: 'Upload Video', icon: UploadCloud },
-              { num: 2, title: 'Reframe & Aspect', icon: Film },
-              { num: 3, title: 'Split Plan', icon: Split },
-              { num: 4, title: 'Text Overlays', icon: Type },
-              { num: 5, title: 'Destination', icon: FolderSync },
-              { num: 6, title: 'Review & Render', icon: Play },
+              { num: 1, title: 'Media', desc: 'Select Video', icon: UploadCloud },
+              { num: 2, title: 'Framing', desc: 'Aspect Ratio', icon: Film },
+              { num: 3, title: 'Clips', desc: 'Duration & Cuts', icon: Scissors },
+              { num: 4, title: 'Style', desc: 'Titles & Badges', icon: Type },
+              { num: 5, title: 'Export', desc: 'Finish & Render', icon: Play },
             ].map((step) => {
               const Icon = step.icon;
               const isActive = currentStep === step.num;
@@ -857,18 +827,18 @@ export default function HomePage() {
                 <button
                   key={step.num}
                   onClick={() => setCurrentStep(step.num)}
-                  className={`flex items-center gap-3 px-3 py-2 rounded-xl transition-all whitespace-nowrap btn-pressable ${
+                  className={`flex-1 flex items-center gap-2.5 px-3 py-2 rounded-xl transition-all whitespace-nowrap btn-pressable ${
                     isActive
-                      ? 'bg-[#E3F2FD] border-2 border-[#2196F3] shadow-sm'
+                      ? 'bg-[#E3F2FD] border-2 border-[#2196F3] shadow-xs'
                       : isPast
-                      ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                      ? 'bg-emerald-50/80 text-emerald-800 border border-emerald-200 hover:bg-emerald-50'
                       : 'text-slate-500 hover:text-[#0D47A1] hover:bg-[#F0F7FF] border border-transparent'
                   }`}
                 >
                   <div
-                    className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold ${
+                    className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold shrink-0 transition-all ${
                       isActive
-                        ? 'bg-[#2196F3] text-white shadow-sm'
+                        ? 'bg-[#2196F3] text-white shadow-xs ring-2 ring-[#2196F3]/30'
                         : isPast
                         ? 'bg-emerald-500 text-white'
                         : 'bg-slate-100 text-slate-600 border border-slate-200'
@@ -876,11 +846,11 @@ export default function HomePage() {
                   >
                     {isPast ? <CheckCircle2 className="w-4 h-4" /> : step.num}
                   </div>
-                  <div className="text-left">
-                    <p className={`text-xs font-bold ${isActive ? 'text-[#0D47A1]' : isPast ? 'text-emerald-800' : 'text-slate-700'}`}>
+                  <div className="text-left min-w-0">
+                    <p className={`text-xs font-bold truncate ${isActive ? 'text-[#0D47A1]' : isPast ? 'text-emerald-900' : 'text-slate-700'}`}>
                       {step.title}
                     </p>
-                    <p className="text-[10px] text-slate-500 font-medium">Step 0{step.num}</p>
+                    <p className="text-[10px] text-slate-500 font-medium truncate">{step.desc}</p>
                   </div>
                 </button>
               );
@@ -891,60 +861,108 @@ export default function HomePage() {
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1">
             {/* Step Left / Control Column */}
             <div className="lg:col-span-8 flex flex-col gap-6">
-              {/* Step 1: Upload */}
+              {/* Step 1: Media */}
               {currentStep === 1 && (
                 <UploadZone
                   onUploadComplete={(data) => {
                     setUploadedVideo(data);
-                    setTimeout(() => setCurrentStep(2), 600);
                   }}
+                  onProceed={() => setCurrentStep(2)}
                   onReset={() => setUploadedVideo(null)}
                 />
               )}
 
-              {/* Step 2: Reframe */}
+              {/* Step 2: Framing & Aspect Ratio */}
               {currentStep === 2 && (
-                <div className="bg-white rounded-2xl p-6 border border-[#90CAF9]/60 shadow-sm flex flex-col gap-6">
+                <div className="bg-white rounded-2xl p-6 border border-[#90CAF9]/60 shadow-xs flex flex-col gap-6">
                   <div>
-                    <h3 className="text-base font-bold text-[#0D47A1] mb-1">Target Aspect Ratio & Resolution</h3>
+                    <h3 className="text-base font-bold text-[#0D47A1] mb-1">Target Aspect Ratio &amp; Canvas</h3>
                     <p className="text-xs text-slate-600">
-                      Select output aspect ratio. Videos are automatically reframed to fit vertical or square feeds.
+                      Select your target format. Videos are automatically reframed to fit vertical, square, or widescreen feeds.
                     </p>
                   </div>
 
-                  {/* Preset Ratios */}
+                  {/* Preset Ratios with Visual Silicon Previews */}
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                     {[
-                      { id: '9:16', label: '9:16 Vertical', desc: 'Reels / Shorts / TikTok', res: '1080x1920' },
-                      { id: '1:1', label: '1:1 Square', desc: 'Instagram Feed / Threads', res: '1080x1080' },
-                      { id: '4:5', label: '4:5 Portrait', desc: 'Facebook / Instagram Feed', res: '1080x1350' },
-                      { id: '16:9', label: '16:9 Landscape', desc: 'YouTube / Standard Video', res: '1920x1080' },
-                    ].map((ratio) => (
-                      <button
-                        key={ratio.id}
-                        onClick={() => setSelectedRatio(ratio.id as any)}
-                        className={`p-4 rounded-xl border text-left transition-all btn-pressable ${
-                          selectedRatio === ratio.id
-                            ? 'bg-[#E3F2FD] border-2 border-[#2196F3] text-[#0D47A1] shadow-md ring-2 ring-[#2196F3]/20'
-                            : 'bg-white border-[#90CAF9]/60 text-slate-700 hover:border-[#2196F3] hover:bg-[#F0F7FF]'
-                        }`}
-                      >
-                        <p className="text-sm font-bold text-[#0D47A1] mb-1">{ratio.label}</p>
-                        <p className="text-[11px] text-[#2196F3] font-mono font-bold mb-2">{ratio.res}</p>
-                        <p className="text-[10px] text-slate-600 font-medium">{ratio.desc}</p>
-                      </button>
-                    ))}
+                      {
+                        id: '9:16',
+                        label: '9:16 Vertical',
+                        badge: 'Recommended',
+                        badgeColor: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+                        desc: 'Reels, Shorts, TikTok',
+                        res: '1080x1920',
+                        shapeClass: 'w-4 h-7 rounded-[2px]',
+                      },
+                      {
+                        id: '1:1',
+                        label: '1:1 Square',
+                        desc: 'Instagram & Threads Feed',
+                        res: '1080x1080',
+                        shapeClass: 'w-5 h-5 rounded-[2px]',
+                      },
+                      {
+                        id: '4:5',
+                        label: '4:5 Portrait',
+                        desc: 'Social Mobile Feed',
+                        res: '1080x1350',
+                        shapeClass: 'w-5 h-6 rounded-[2px]',
+                      },
+                      {
+                        id: '16:9',
+                        label: '16:9 Landscape',
+                        desc: 'YouTube & Desktop',
+                        res: '1920x1080',
+                        shapeClass: 'w-7 h-4 rounded-[2px]',
+                      },
+                    ].map((ratio) => {
+                      const isSelected = selectedRatio === ratio.id;
+                      return (
+                        <button
+                          key={ratio.id}
+                          onClick={() => setSelectedRatio(ratio.id as any)}
+                          className={`p-4 rounded-xl border text-left transition-all btn-pressable flex flex-col justify-between ${
+                            isSelected
+                              ? 'bg-[#E3F2FD] border-2 border-[#2196F3] text-[#0D47A1] shadow-sm ring-2 ring-[#2196F3]/20'
+                              : 'bg-white border-[#90CAF9]/60 text-slate-700 hover:border-[#2196F3] hover:bg-[#F0F7FF]'
+                          }`}
+                        >
+                          <div>
+                            <div className="flex items-center justify-between mb-2">
+                              <div
+                                className={`border-2 ${
+                                  isSelected ? 'border-[#2196F3] bg-[#2196F3]/20' : 'border-slate-400 bg-slate-100'
+                                } ${ratio.shapeClass}`}
+                              />
+                              {ratio.badge && (
+                                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${ratio.badgeColor}`}>
+                                  {ratio.badge}
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-xs font-bold text-[#0D47A1] mb-0.5">{ratio.label}</p>
+                            <p className="text-[10px] text-[#2196F3] font-mono font-bold mb-1.5">{ratio.res}</p>
+                            <p className="text-[10px] text-slate-500 font-medium leading-tight">{ratio.desc}</p>
+                          </div>
+                        </button>
+                      );
+                    })}
                   </div>
 
-                  {/* Reframe Mode Picker */}
+                  {/* Reframe Background Styling */}
                   <div className="pt-4 border-t border-[#90CAF9]/40">
                     <div className="flex items-center justify-between mb-3">
-                      <h4 className="text-xs font-bold text-[#0D47A1]">
-                        Reframe Method (For mismatched ratios)
-                      </h4>
+                      <div>
+                        <h4 className="text-xs font-bold text-[#0D47A1]">
+                          Background Styling (For aspect ratio padding)
+                        </h4>
+                        <p className="text-[11px] text-slate-500 mt-0.5">
+                          Choose how borders are filled when source video shape doesn&apos;t match target format.
+                        </p>
+                      </div>
                       {doesSourceMatchTarget() && (
-                        <span className="text-[11px] text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded border border-emerald-300 font-semibold">
-                          No reframing needed (Source matches target)
+                        <span className="text-[11px] text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded border border-emerald-300 font-semibold shrink-0">
+                          Source matches target format
                         </span>
                       )}
                     </div>
@@ -953,18 +971,18 @@ export default function HomePage() {
                       {[
                         {
                           id: 'blur',
-                          title: 'Blur Background (Fit)',
-                          desc: 'Full video centered over blurred, zoomed background copy (Industry standard).',
+                          title: 'Blurred Background (Recommended)',
+                          desc: 'Full video centered over a stylized, softly blurred ambient copy of your video.',
                         },
                         {
                           id: 'solid',
-                          title: 'Solid Bars (Letterbox)',
-                          desc: 'Full video centered with custom solid black or colored bars.',
+                          title: 'Solid Black Bars (Letterbox)',
+                          desc: 'Full video centered with clean solid black padding bars.',
                         },
                         {
                           id: 'crop',
-                          title: 'Crop to Fill',
-                          desc: 'Zooms to fill frame completely. Overflow is cropped with focal alignment.',
+                          title: 'Zoom to Fill (Smart Crop)',
+                          desc: 'Fills viewport completely. Sides or top are cropped with speaker tracking.',
                         },
                       ].map((mode) => (
                         <button
@@ -975,7 +993,7 @@ export default function HomePage() {
                             doesSourceMatchTarget()
                               ? 'opacity-40 cursor-not-allowed bg-slate-50 border-slate-200 text-slate-400'
                               : reframeMode === mode.id
-                              ? 'bg-[#E3F2FD] border-2 border-[#2196F3] text-[#0D47A1] shadow-md ring-2 ring-[#2196F3]/20'
+                              ? 'bg-[#E3F2FD] border-2 border-[#2196F3] text-[#0D47A1] shadow-sm ring-2 ring-[#2196F3]/20'
                               : 'bg-white border-[#90CAF9]/60 text-slate-700 hover:border-[#2196F3] hover:bg-[#F0F7FF]'
                           }`}
                         >
@@ -985,34 +1003,34 @@ export default function HomePage() {
                       ))}
                     </div>
 
-                    {/* Focal Point Alignment & Smart Pan & Scan (Only when Crop mode is active) */}
+                    {/* Smart Pan & Scan (Only when Crop mode is active) */}
                     {reframeMode === 'crop' && (
                       <div className="mt-4 p-4 rounded-xl bg-[#F0F7FF] border border-[#90CAF9]/80 flex flex-col gap-3">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
                             <Scan className="w-4 h-4 text-[#2196F3]" />
-                            <h5 className="text-xs font-bold text-[#0D47A1]">Crop Alignment & Subject Tracking</h5>
+                            <h5 className="text-xs font-bold text-[#0D47A1]">Subject Alignment &amp; Speaker Tracking</h5>
                           </div>
                           <span className="text-[10px] font-semibold text-blue-700 bg-blue-100 px-2 py-0.5 rounded border border-blue-200">
-                            Smart Pan & Scan
+                            Smart Focus
                           </span>
                         </div>
                         <p className="text-[11px] text-slate-600">
-                          Choose how the vertical viewport aligns across the widescreen frame.
+                          Choose how the vertical viewport centers on your widescreen video footage.
                         </p>
                         <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5">
                           {[
                             {
                               id: 'auto_face',
                               title: 'Auto Face Tracking',
-                              desc: 'Dynamically pans to follow speakers using chrominance centroid tracking.',
+                              desc: 'Intelligently follows speakers while keeping motion smooth and steady.',
                               icon: Scan,
                               recommended: true,
                             },
                             {
                               id: 'center',
                               title: 'Center Focus',
-                              desc: 'Locks viewport to center of frame (50% cut).',
+                              desc: 'Locks viewport to the dead center of the frame.',
                               icon: AlignCenter,
                             },
                             {
@@ -1037,7 +1055,7 @@ export default function HomePage() {
                                 onClick={() => setFocalPoint(item.id as any)}
                                 className={`p-3 rounded-lg border text-left transition-all btn-pressable flex flex-col justify-between ${
                                   isSelected
-                                    ? 'bg-white border-2 border-[#2196F3] text-[#0D47A1] shadow-sm ring-1 ring-[#2196F3]/30'
+                                    ? 'bg-white border-2 border-[#2196F3] text-[#0D47A1] shadow-xs ring-1 ring-[#2196F3]/30'
                                     : 'bg-white/70 border-[#90CAF9]/50 text-slate-700 hover:border-[#2196F3] hover:bg-white'
                                 }`}
                               >
@@ -1059,14 +1077,6 @@ export default function HomePage() {
                             );
                           })}
                         </div>
-                        {focalPoint === 'auto_face' && (
-                          <div className="flex items-center gap-2 pt-1 text-[11px] text-[#0D47A1] font-medium">
-                            <Info className="w-3.5 h-3.5 text-[#2196F3] shrink-0" />
-                            <span>
-                              Uses exponential moving-average smoothing with a deadband filter to eliminate camera jitter while smoothly following talking heads.
-                            </span>
-                          </div>
-                        )}
                       </div>
                     )}
                   </div>
@@ -1075,11 +1085,11 @@ export default function HomePage() {
 
               {/* Step 3: Split Settings & Live Parts Table Preview */}
               {currentStep === 3 && (
-                <div className="bg-white rounded-2xl p-6 border border-[#90CAF9]/60 shadow-sm flex flex-col gap-6">
+                <div className="bg-white rounded-2xl p-6 border border-[#90CAF9]/60 shadow-xs flex flex-col gap-6">
                   <div>
-                    <h3 className="text-base font-bold text-[#0D47A1] mb-1">Splitting Engine</h3>
+                    <h3 className="text-base font-bold text-[#0D47A1] mb-1">Clip Duration &amp; Splitting Plan</h3>
                     <p className="text-xs text-slate-600">
-                      Determine how your video is sliced into standalone parts with zero frame drift.
+                      Choose how your video is sliced into standalone clips with zero frame drift and clean cuts.
                     </p>
                   </div>
 
@@ -1096,17 +1106,85 @@ export default function HomePage() {
                         onClick={() => setSplitMode(mode.id as any)}
                         className={`p-3.5 rounded-xl border text-left transition-all btn-pressable ${
                           splitMode === mode.id
-                            ? 'bg-[#E3F2FD] border-2 border-[#2196F3] text-[#0D47A1] shadow-md ring-2 ring-[#2196F3]/20'
+                            ? 'bg-[#E3F2FD] border-2 border-[#2196F3] text-[#0D47A1] shadow-xs ring-2 ring-[#2196F3]/20'
                             : 'bg-white border-[#90CAF9]/60 text-slate-700 hover:border-[#2196F3] hover:bg-[#F0F7FF]'
                         }`}
                       >
                         <p className="text-xs font-bold text-[#0D47A1] mb-0.5">{mode.title}</p>
-                        <p className="text-[10px] text-slate-600 font-medium">{mode.desc}</p>
+                        <p className="text-[10px] text-slate-500 font-medium">{mode.desc}</p>
                       </button>
                     ))}
                   </div>
 
-                  {/* Mode Specific Parameters */}
+                  {/* Fixed Duration: Quick Chips & Custom Input */}
+                  {splitMode === 'fixed' && (
+                    <div className="bg-[#F0F7FF] p-4 rounded-xl border border-[#90CAF9]/60 flex flex-col gap-3">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div>
+                          <label className="text-xs font-bold text-[#0D47A1] block">Choose Clip Length</label>
+                          <p className="text-[10px] text-slate-500">Pick a popular preset or type exact seconds</p>
+                        </div>
+                        {/* Quick Duration Chips */}
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {[
+                            { label: '30s (Shorts)', sec: 30 },
+                            { label: '60s (Reels/TikTok)', sec: 60 },
+                            { label: '90s (Stories)', sec: 90 },
+                          ].map((chip) => (
+                            <button
+                              key={chip.sec}
+                              type="button"
+                              onClick={() => setFixedLength(chip.sec)}
+                              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all btn-pressable ${
+                                fixedLength === chip.sec
+                                  ? 'bg-[#2196F3] text-white shadow-xs'
+                                  : 'bg-white text-slate-700 border border-[#90CAF9]/60 hover:border-[#2196F3]'
+                              }`}
+                            >
+                              {chip.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-2 border-t border-[#90CAF9]/40">
+                        <span className="text-xs font-semibold text-slate-600">Exact Duration:</span>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="number"
+                            min="1"
+                            value={fixedLength}
+                            onChange={(e) => setFixedLength(Math.max(1, Number(e.target.value)))}
+                            className="w-24 bg-white border border-[#90CAF9] rounded-lg px-3 py-1.5 text-xs text-[#0D47A1] font-bold text-center font-mono focus:outline-none focus:border-[#2196F3] focus:ring-2 focus:ring-[#2196F3]/20"
+                          />
+                          <span className="text-xs font-semibold text-slate-600">seconds per clip</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Equal Parts Mode */}
+                  {splitMode === 'parts' && (
+                    <div className="bg-[#F0F7FF] p-4 rounded-xl border border-[#90CAF9]/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div>
+                        <label className="text-xs font-bold text-[#0D47A1] block mb-0.5">Total Number of Parts</label>
+                        <p className="text-[11px] text-slate-600">Video will be evenly divided into this number of segments</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          min="1"
+                          max="100"
+                          value={numberOfParts}
+                          onChange={(e) => setNumberOfParts(Math.max(1, Number(e.target.value)))}
+                          className="w-24 bg-white border border-[#90CAF9] rounded-lg px-3 py-1.5 text-xs text-[#0D47A1] font-bold text-center font-mono focus:outline-none focus:border-[#2196F3] focus:ring-2 focus:ring-[#2196F3]/20"
+                        />
+                        <span className="text-xs font-semibold text-slate-600">parts</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* AI Highlights Mode */}
                   {splitMode === 'ai_highlights' && (
                     <div className="bg-[#F0F7FF] p-5 rounded-2xl border border-[#90CAF9]/80 flex flex-col gap-4">
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#90CAF9]/40 pb-3">
@@ -1180,7 +1258,7 @@ export default function HomePage() {
                             {aiClips.map((clip, idx) => (
                               <div
                                 key={clip.id}
-                                className="bg-white p-3.5 rounded-xl border border-[#90CAF9]/60 shadow-sm flex items-center justify-between gap-3"
+                                className="bg-white p-3.5 rounded-xl border border-[#90CAF9]/60 shadow-xs flex items-center justify-between gap-3"
                               >
                                 <div className="flex items-center gap-3 min-w-0">
                                   <div className="w-8 h-8 rounded-lg bg-blue-50 border border-blue-200 text-[#0D47A1] font-bold text-xs flex items-center justify-center shrink-0">
@@ -1220,107 +1298,99 @@ export default function HomePage() {
                     </div>
                   )}
 
-                  {/* Mode Specific Parameters */}
-                  {splitMode === 'fixed' && (
-                    <div className="bg-[#F0F7FF] p-4 rounded-xl border border-[#90CAF9]/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                      <div>
-                        <label className="text-xs font-bold text-[#0D47A1] block mb-0.5">Part Length (Seconds)</label>
-                        <p className="text-[11px] text-slate-600">Standard 60s for Shorts/Reels, or custom length</p>
-                      </div>
+                  {/* Summary Feedback Banner */}
+                  <div className="flex items-center gap-2.5 p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>
+                      {computedPlan.length} clips calculated with zero frame drift
+                      {splitMode === 'fixed' ? ` (~${fixedLength}s each)` : ''}.
+                    </span>
+                  </div>
+
+                  {/* Collapsible Fine-Tuning & Overlap Accordion */}
+                  <div className="rounded-xl border border-[#90CAF9]/60 bg-[#F8FAFC] overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => setShowSplitAdvanced(!showSplitAdvanced)}
+                      className="w-full flex items-center justify-between px-4 py-3 text-left text-xs font-bold text-[#0D47A1] hover:bg-[#F0F7FF] transition-colors"
+                    >
                       <div className="flex items-center gap-2">
-                        <input
-                          type="number"
-                          min="1"
-                          value={fixedLength}
-                          onChange={(e) => setFixedLength(Math.max(1, Number(e.target.value)))}
-                          className="w-24 bg-white border border-[#90CAF9] rounded-lg px-3 py-1.5 text-xs text-[#0D47A1] font-bold text-center font-mono focus:outline-none focus:border-[#2196F3] focus:ring-2 focus:ring-[#2196F3]/20"
-                        />
-                        <span className="text-xs font-semibold text-slate-600">sec</span>
+                        <Sliders className="w-3.5 h-3.5 text-[#2196F3]" />
+                        <span>Fine-Tune Clip Overlap &amp; Last Part Rules</span>
+                        <span className="text-[10px] font-normal text-slate-500">
+                          (Overlap: {overlapSeconds}s &bull; Min last part: {minLastPartSeconds}s &bull; {lastPartAction === 'merge' ? 'Merge' : 'Keep'})
+                        </span>
                       </div>
-                    </div>
-                  )}
+                      <ChevronDown
+                        className={`w-3.5 h-3.5 text-slate-500 transition-transform duration-200 ${
+                          showSplitAdvanced ? 'rotate-180' : ''
+                        }`}
+                      />
+                    </button>
 
-                  {splitMode === 'parts' && (
-                    <div className="bg-[#F0F7FF] p-4 rounded-xl border border-[#90CAF9]/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                      <div>
-                        <label className="text-xs font-bold text-[#0D47A1] block mb-0.5">Total Number of Parts</label>
-                        <p className="text-[11px] text-slate-600">Video will be evenly divided into this number of segments</p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="number"
-                          min="1"
-                          max="100"
-                          value={numberOfParts}
-                          onChange={(e) => setNumberOfParts(Math.max(1, Number(e.target.value)))}
-                          className="w-24 bg-white border border-[#90CAF9] rounded-lg px-3 py-1.5 text-xs text-[#0D47A1] font-bold text-center font-mono focus:outline-none focus:border-[#2196F3] focus:ring-2 focus:ring-[#2196F3]/20"
-                        />
-                        <span className="text-xs font-semibold text-slate-600">parts</span>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Overlap & Minimum Last Part */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
-                    <div className="bg-[#F0F7FF] p-3.5 rounded-xl border border-[#90CAF9]/60 flex items-center justify-between">
-                      <div>
-                        <label className="text-xs font-bold text-[#0D47A1] block">Overlap Between Parts</label>
-                        <p className="text-[10px] text-slate-600">Replays N seconds at the start of next part</p>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <input
-                          type="number"
-                          min="0"
-                          max="30"
-                          value={overlapSeconds}
-                          onChange={(e) => setOverlapSeconds(Math.max(0, Number(e.target.value)))}
-                          className="w-16 bg-white border border-[#90CAF9] rounded-lg px-2 py-1 text-xs text-[#0D47A1] font-bold text-center font-mono focus:outline-none focus:border-[#2196F3]"
-                        />
-                        <span className="text-[11px] font-semibold text-slate-600">s</span>
-                      </div>
-                    </div>
-
-                    <div className="bg-[#F0F7FF] p-3.5 rounded-xl border border-[#90CAF9]/60 flex flex-col gap-2">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <label className="text-xs font-bold text-[#0D47A1] block">Minimum Last-Part Length</label>
-                          <p className="text-[10px] text-slate-600">If final part is shorter than this</p>
+                    {showSplitAdvanced && (
+                      <div className="p-4 pt-3 border-t border-[#90CAF9]/40 bg-white grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="bg-[#F0F7FF] p-3.5 rounded-xl border border-[#90CAF9]/60 flex items-center justify-between">
+                          <div>
+                            <label className="text-xs font-bold text-[#0D47A1] block">Overlap Between Parts</label>
+                            <p className="text-[10px] text-slate-600">Replays N seconds at the start of next part</p>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              type="number"
+                              min="0"
+                              max="30"
+                              value={overlapSeconds}
+                              onChange={(e) => setOverlapSeconds(Math.max(0, Number(e.target.value)))}
+                              className="w-16 bg-white border border-[#90CAF9] rounded-lg px-2 py-1 text-xs text-[#0D47A1] font-bold text-center font-mono focus:outline-none focus:border-[#2196F3]"
+                            />
+                            <span className="text-[11px] font-semibold text-slate-600">s</span>
+                          </div>
                         </div>
-                        <div className="flex items-center gap-1.5">
-                          <input
-                            type="number"
-                            min="1"
-                            value={minLastPartSeconds}
-                            onChange={(e) => setMinLastPartSeconds(Math.max(1, Number(e.target.value)))}
-                            className="w-16 bg-white border border-[#90CAF9] rounded-lg px-2 py-1 text-xs text-[#0D47A1] font-bold text-center font-mono focus:outline-none focus:border-[#2196F3]"
-                          />
-                          <span className="text-[11px] font-semibold text-slate-600">s</span>
+
+                        <div className="bg-[#F0F7FF] p-3.5 rounded-xl border border-[#90CAF9]/60 flex flex-col gap-2">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <label className="text-xs font-bold text-[#0D47A1] block">Minimum Last-Part Length</label>
+                              <p className="text-[10px] text-slate-600">If final part is shorter than this</p>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <input
+                                type="number"
+                                min="1"
+                                value={minLastPartSeconds}
+                                onChange={(e) => setMinLastPartSeconds(Math.max(1, Number(e.target.value)))}
+                                className="w-16 bg-white border border-[#90CAF9] rounded-lg px-2 py-1 text-xs text-[#0D47A1] font-bold text-center font-mono focus:outline-none focus:border-[#2196F3]"
+                              />
+                              <span className="text-[11px] font-semibold text-slate-600">s</span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-4 text-xs pt-1">
+                            <label className="flex items-center gap-1.5 cursor-pointer text-slate-700 font-medium">
+                              <input
+                                type="radio"
+                                name="lastPartAction"
+                                checked={lastPartAction === 'merge'}
+                                onChange={() => setLastPartAction('merge')}
+                                className="text-[#2196F3] focus:ring-0"
+                              />
+                              Merge into previous
+                            </label>
+                            <label className="flex items-center gap-1.5 cursor-pointer text-slate-700 font-medium">
+                              <input
+                                type="radio"
+                                name="lastPartAction"
+                                checked={lastPartAction === 'keep'}
+                                onChange={() => setLastPartAction('keep')}
+                                className="text-[#2196F3] focus:ring-0"
+                              />
+                              Keep as short part
+                            </label>
+                          </div>
                         </div>
                       </div>
-
-                      <div className="flex items-center gap-4 text-xs pt-1">
-                        <label className="flex items-center gap-1.5 cursor-pointer text-slate-700 font-medium">
-                          <input
-                            type="radio"
-                            name="lastPartAction"
-                            checked={lastPartAction === 'merge'}
-                            onChange={() => setLastPartAction('merge')}
-                            className="text-[#2196F3] focus:ring-0"
-                          />
-                          Merge into previous
-                        </label>
-                        <label className="flex items-center gap-1.5 cursor-pointer text-slate-700 font-medium">
-                          <input
-                            type="radio"
-                            name="lastPartAction"
-                            checked={lastPartAction === 'keep'}
-                            onChange={() => setLastPartAction('keep')}
-                            className="text-[#2196F3] focus:ring-0"
-                          />
-                          Keep as short part
-                        </label>
-                      </div>
-                    </div>
+                    )}
                   </div>
 
                   {planError && (
@@ -1355,119 +1425,31 @@ export default function HomePage() {
                 />
               )}
 
-              {/* Step 5: Output and Destination */}
+              {/* Step 5: Export & Render */}
               {currentStep === 5 && (
                 <div className="bg-white rounded-2xl p-6 border border-[#90CAF9]/60 shadow-sm flex flex-col gap-6">
-                  <div>
-                    <h3 className="text-base font-bold text-[#0D47A1] mb-1">Step E: Output & Destination</h3>
-                    <p className="text-xs text-slate-600">
-                      Configure output encoding quality, filename pattern, and dispatch destination.
-                    </p>
+                  <div className="flex items-center justify-between pb-3 border-b border-[#90CAF9]/40">
+                    <div>
+                      <h3 className="text-base font-bold text-[#0D47A1]">Step 5: Export &amp; Render</h3>
+                      <p className="text-xs text-slate-600">
+                        Choose where to save your clips, adjust quality, and start rendering in one click.
+                      </p>
+                    </div>
+                    <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                      {computedPlan.length} clips planned
+                    </span>
                   </div>
 
-                  {/* Quality & Preset Selector */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    {[
-                      {
-                        id: 'fast',
-                        title: 'Fast (Lower CPU)',
-                        desc: 'Speed optimized. Ideal for rapid drafts or lower performance systems.',
-                        badge: 'preset: veryfast • crf: 23',
-                      },
-                      {
-                        id: 'balanced',
-                        title: 'Balanced (Standard)',
-                        desc: 'Best balance of visual fidelity and rendering speed (Recommended).',
-                        badge: 'preset: medium • crf: 21',
-                      },
-                      {
-                        id: 'high',
-                        title: 'High Quality',
-                        desc: 'Visually lossless encoding. Produces pristine video with fine details.',
-                        badge: 'preset: slow • crf: 18',
-                      },
-                    ].map((preset) => (
-                      <button
-                        key={preset.id}
-                        onClick={() => setQualityPreset(preset.id as any)}
-                        className={`p-4 rounded-xl border text-left transition-all btn-pressable ${
-                          qualityPreset === preset.id
-                            ? 'bg-[#E3F2FD] border-2 border-[#2196F3] text-[#0D47A1] shadow-md ring-2 ring-[#2196F3]/20'
-                            : 'bg-white border-[#90CAF9]/60 text-slate-700 hover:border-[#2196F3] hover:bg-[#F0F7FF]'
-                        }`}
-                      >
-                        <p className="text-xs font-bold text-[#0D47A1] mb-1">{preset.title}</p>
-                        <p className="text-[11px] text-slate-600 mb-2 leading-relaxed font-medium">{preset.desc}</p>
-                        <span className="text-[10px] font-mono text-[#0D47A1] bg-[#E3F2FD] border border-[#90CAF9] px-2 py-0.5 rounded font-semibold">
-                          {preset.badge}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
+                  {/* Destination Target */}
+                  <div className="flex flex-col gap-3">
+                    <label className="text-xs font-bold text-[#0D47A1] uppercase tracking-wide">
+                      1. Where to Save Your Clips
+                    </label>
 
-                  {/* Filename Template */}
-                  <div className="bg-[#F0F7FF] p-4 rounded-xl border border-[#90CAF9]/60 flex flex-col gap-3">
-                    <div className="flex items-center justify-between">
-                      <label className="text-xs font-bold text-[#0D47A1]">Filename Template</label>
-                      <span className="text-[11px] font-mono font-semibold text-emerald-700">
-                        Preview: {getSampleFilename()}
-                      </span>
-                    </div>
-
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        value={filenameTemplate}
-                        onChange={(e) => setFilenameTemplate(e.target.value)}
-                        className="flex-1 bg-white border border-[#90CAF9] rounded-xl px-3 py-2 text-xs text-[#0D47A1] font-mono font-semibold focus:outline-none focus:border-[#2196F3] focus:ring-2 focus:ring-[#2196F3]/20"
-                      />
-                      <span className="px-3 py-2 rounded-xl bg-white border border-[#90CAF9] text-xs text-slate-600 font-mono font-bold">
-                        .mp4
-                      </span>
-                    </div>
-
-                    {/* Quick tokens */}
-                    <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-                      <span className="text-slate-600 font-semibold">Insert tag:</span>
-                      {['{title}', '{part}', '{nn}', '{total}'].map((token) => (
-                        <button
-                          key={token}
-                          onClick={() => setFilenameTemplate((prev) => `${prev}_${token}`)}
-                          className="px-2 py-0.5 rounded bg-white hover:bg-[#E3F2FD] text-[#0D47A1] font-mono font-bold transition-all border border-[#90CAF9]"
-                        >
-                          +{token}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Video Folder Organization */}
-                  <div className="bg-[#F0F7FF] p-4 rounded-xl border border-[#90CAF9]/60 flex flex-col gap-2.5">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <FolderSync className="w-4 h-4 text-[#2196F3]" />
-                        <label className="text-xs font-bold text-[#0D47A1]">
-                          Organize Into Folder (Local Disk &amp; Google Drive)
-                        </label>
-                      </div>
-                      <span className="text-[10px] text-slate-500 font-medium">
-                        Assign to existing folder or create new custom folder
-                      </span>
-                    </div>
-
-                    <FolderSelector
-                      selectedFolder={selectedFolder}
-                      onSelectFolder={setSelectedFolder}
-                    />
-                  </div>
-
-                  {/* Destination Choice */}
-                  <div className="flex flex-col gap-3 pt-2 border-t border-[#90CAF9]/40">
-                    <label className="text-xs font-bold text-[#0D47A1]">Destination Target</label>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       {/* Option 1: Local ZIP */}
                       <button
+                        type="button"
                         onClick={() => setDestination('local')}
                         className={`p-4 rounded-xl border text-left transition-all btn-pressable ${
                           destination === 'local'
@@ -1477,18 +1459,19 @@ export default function HomePage() {
                       >
                         <div className="flex items-center justify-between mb-2">
                           <div className="flex items-center gap-2">
-                            <Download className="w-4 h-4 text-emerald-600" />
-                            <span className="text-xs font-bold text-[#0D47A1]">Local Server & ZIP Package</span>
+                            <Download className="w-4 h-4 text-[#2196F3]" />
+                            <span className="text-xs font-bold text-[#0D47A1]">Download to Mac / PC (ZIP)</span>
                           </div>
                           {destination === 'local' && <Check className="w-4 h-4 text-[#2196F3]" />}
                         </div>
                         <p className="text-[11px] text-slate-600 leading-relaxed font-medium">
-                          Keeps all rendered video parts on server storage. Download as a single ZIP or individual MP4 files directly from the browser.
+                          Keeps all rendered clips on local storage. Download as a single ZIP or individual MP4s straight from your browser.
                         </p>
                       </button>
 
                       {/* Option 2: Google Drive */}
                       <button
+                        type="button"
                         onClick={() => setDestination('drive')}
                         className={`p-4 rounded-xl border text-left transition-all btn-pressable ${
                           destination === 'drive'
@@ -1498,25 +1481,22 @@ export default function HomePage() {
                       >
                         <div className="flex items-center justify-between mb-2">
                           <div className="flex items-center gap-2">
-                            <FolderSync className="w-4 h-4 text-[#2196F3]" />
+                            <FolderSync className="w-4 h-4 text-emerald-600" />
                             <span className="text-xs font-bold text-[#0D47A1]">Direct to Google Drive</span>
-                            <span className="text-[9px] uppercase font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-300">
-                              Zero Local Storage
-                            </span>
                           </div>
                           {destination === 'drive' && <Check className="w-4 h-4 text-[#2196F3]" />}
                         </div>
                         <p className="text-[11px] text-slate-600 leading-relaxed mb-2 font-medium">
-                          Renders each part directly to Google Drive. Local temporary MP4 files are immediately purged after upload, consuming zero residual hard drive space.
+                          Uploads directly to your Google Drive and purges local temp files immediately to save storage.
                         </p>
                         <div className="flex items-center gap-1.5 text-[10px]">
                           {health?.services.googleDrive.configured ? (
                             <span className="text-emerald-700 font-semibold flex items-center gap-1">
-                              <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Drive Configured & Ready
+                              <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Drive Connected
                             </span>
                           ) : (
                             <span className="text-amber-700 font-semibold flex items-center gap-1">
-                              <AlertTriangle className="w-3 h-3 text-amber-600" /> Drive not connected yet (uses local fallback)
+                              <AlertTriangle className="w-3 h-3 text-amber-600" /> Drive not connected (uses local fallback)
                             </span>
                           )}
                         </div>
@@ -1525,21 +1505,21 @@ export default function HomePage() {
 
                     {/* Sub-options when Google Drive is chosen */}
                     {destination === 'drive' && (
-                      <div className="bg-[#F0F7FF] p-4 rounded-xl border border-[#90CAF9]/60 flex flex-col gap-3 mt-2">
+                      <div className="bg-[#F0F7FF] p-4 rounded-xl border border-[#90CAF9]/60 flex flex-col gap-3">
                         <div>
                           <label className="text-xs font-bold text-[#0D47A1] block mb-1">
-                            Target Drive Folder ID or URL (Optional)
+                            Google Drive Folder ID or URL (Optional)
                           </label>
                           <input
                             type="text"
                             value={driveFolderId}
                             onChange={(e) => setDriveFolderId(e.target.value)}
-                            placeholder="Defaults to setting or root directory"
+                            placeholder="Leave empty for root folder or default configured folder"
                             className="w-full bg-white border border-[#90CAF9] rounded-lg px-3 py-1.5 text-xs text-[#0D47A1] font-mono focus:outline-none focus:border-[#2196F3]"
                           />
                         </div>
 
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
                           <label className="flex items-center gap-2 text-xs text-slate-700 font-medium cursor-pointer">
                             <input
                               type="checkbox"
@@ -1552,7 +1532,7 @@ export default function HomePage() {
 
                           <div className="flex items-center gap-2 text-xs">
                             <span className="text-slate-600 font-medium shrink-0">If file exists:</span>
-                            <div className="w-48">
+                            <div className="w-44">
                               <CustomSelect
                                 value={onConflict}
                                 onChange={(val) => setOnConflict(val as any)}
@@ -1569,175 +1549,143 @@ export default function HomePage() {
                       </div>
                     )}
                   </div>
-                </div>
-              )}
 
-              {/* Step 6: Review & Start Processing */}
-              {currentStep === 6 && (
-                <div className="bg-white rounded-2xl p-6 border border-[#90CAF9]/60 shadow-sm flex flex-col gap-6">
-                  <div>
-                    <h3 className="text-base font-bold text-[#0D47A1] mb-1">Step F: Review & Launch Engine</h3>
-                    <p className="text-xs text-slate-600">
-                      Verify all rendering recipes, split segments, and overlay parameters before enqueuing to worker.
-                    </p>
-                  </div>
-
-                  {/* Comprehensive Review Summary Grid */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {/* Card 1: Source Video Facts */}
+                  {/* Project Folder & Filename Pattern */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-[#90CAF9]/40">
+                    {/* Folder Organization */}
                     <div className="bg-[#F0F7FF] p-4 rounded-xl border border-[#90CAF9]/60 flex flex-col gap-2">
-                      <h4 className="text-xs font-bold text-[#0D47A1] flex items-center gap-1.5">
-                        <Film className="w-3.5 h-3.5 text-[#2196F3]" /> Source Video Facts
-                      </h4>
-                      <div className="text-xs text-slate-700 space-y-1.5 pt-1 font-medium">
-                        <div className="flex justify-between">
-                          <span className="text-slate-500">Filename:</span>
-                          <span className="font-bold text-[#0D47A1] truncate max-w-[180px]">
-                            {uploadedVideo?.originalFilename || 'video.mp4'}
-                          </span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-slate-500">File Size:</span>
-                          <span className="font-mono text-slate-800">
-                            {((uploadedVideo?.sizeBytes || 0) / (1024 * 1024)).toFixed(1)} MB
-                          </span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-slate-500">Source Res:</span>
-                          <span className="font-mono text-slate-800">
-                            {uploadedVideo?.probe
-                              ? `${uploadedVideo.probe.displayWidth}x${uploadedVideo.probe.displayHeight}`
-                              : 'Unknown'}
-                          </span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-slate-500">Total Duration:</span>
-                          <span className="font-mono text-slate-800">
-                            {(uploadedVideo?.probe?.duration || 0).toFixed(1)}s
-                          </span>
-                        </div>
+                      <div className="flex items-center gap-2">
+                        <Folder className="w-4 h-4 text-[#2196F3]" />
+                        <label className="text-xs font-bold text-[#0D47A1]">Project Folder</label>
                       </div>
+                      <p className="text-[10px] text-slate-600">Assign output clips to a folder for easy sorting</p>
+                      <FolderSelector
+                        selectedFolder={selectedFolder}
+                        onSelectFolder={setSelectedFolder}
+                      />
                     </div>
 
-                    {/* Card 2: Reframing Recipe */}
+                    {/* Filename Template */}
                     <div className="bg-[#F0F7FF] p-4 rounded-xl border border-[#90CAF9]/60 flex flex-col gap-2">
-                      <h4 className="text-xs font-bold text-[#0D47A1] flex items-center gap-1.5">
-                        <Sliders className="w-3.5 h-3.5 text-emerald-600" /> Reframing Recipe
-                      </h4>
-                      <div className="text-xs text-slate-700 space-y-1.5 pt-1 font-medium">
-                        <div className="flex justify-between">
-                          <span className="text-slate-500">Target Ratio:</span>
-                          <span className="font-bold text-[#0D47A1] font-mono">{selectedRatio}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-slate-500">Reframe Method:</span>
-                          <span className="capitalize text-slate-800">
-                            {reframeMode === 'crop'
-                              ? `Crop (${focalPoint === 'auto_face' ? 'Auto Face Track' : focalPoint})`
-                              : reframeMode}
-                          </span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-slate-500">Quality Preset:</span>
-                          <span className="capitalize text-slate-800">{qualityPreset}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-slate-500">Encoding Format:</span>
-                          <span className="font-mono text-slate-800">MP4 (H.264 / AAC)</span>
-                        </div>
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-bold text-[#0D47A1]">Filename Pattern</label>
+                        <span className="text-[10px] font-mono font-semibold text-emerald-700 truncate max-w-[170px]">
+                          {getSampleFilename()}
+                        </span>
                       </div>
-                    </div>
-
-                    {/* Card 3: Split Blueprint */}
-                    <div className="bg-[#F0F7FF] p-4 rounded-xl border border-[#90CAF9]/60 flex flex-col gap-2">
-                      <h4 className="text-xs font-bold text-[#0D47A1] flex items-center gap-1.5">
-                        <Split className="w-3.5 h-3.5 text-[#0288D1]" /> Slicing Blueprint
-                      </h4>
-                      <div className="text-xs text-slate-700 space-y-1.5 pt-1 font-medium">
-                        <div className="flex justify-between">
-                          <span className="text-slate-500">Split Mode:</span>
-                          <span className="capitalize text-slate-800">{splitMode}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-slate-500">Total Planned Parts:</span>
-                          <span className="font-bold text-emerald-700 font-mono">
-                            {computedPlan.length} segments
-                          </span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-slate-500">Overlap:</span>
-                          <span className="font-mono text-slate-800">{overlapSeconds}s</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-slate-500">Min Last-Part:</span>
-                          <span className="text-slate-800 font-mono">
-                            {minLastPartSeconds}s ({lastPartAction})
-                          </span>
-                        </div>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={filenameTemplate}
+                          onChange={(e) => setFilenameTemplate(e.target.value)}
+                          className="flex-1 bg-white border border-[#90CAF9] rounded-lg px-2.5 py-1.5 text-xs text-[#0D47A1] font-mono font-semibold focus:outline-none focus:border-[#2196F3]"
+                        />
+                        <span className="px-2.5 py-1.5 rounded-lg bg-white border border-[#90CAF9] text-xs text-slate-600 font-mono font-bold">
+                          .mp4
+                        </span>
                       </div>
-                    </div>
-
-                    {/* Card 4: Destination & Storage */}
-                    <div className="bg-[#F0F7FF] p-4 rounded-xl border border-[#90CAF9]/60 flex flex-col gap-2">
-                      <h4 className="text-xs font-bold text-[#0D47A1] flex items-center gap-1.5">
-                        <FolderSync className="w-3.5 h-3.5 text-indigo-600" /> Storage & Dispatch
-                      </h4>
-                      <div className="text-xs text-slate-700 space-y-1.5 pt-1 font-medium">
-                        <div className="flex justify-between">
-                          <span className="text-slate-500">Destination:</span>
-                          <span className="font-bold text-[#0D47A1] capitalize">
-                            {destination === 'drive'
-                              ? 'Google Drive (Direct • Zero Local Storage)'
-                              : 'Local ZIP Download'}
-                          </span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-slate-500">Assigned Folder:</span>
-                          <span className="font-bold text-[#0D47A1] flex items-center gap-1.5">
-                            <Folder className="w-4 h-4 text-[#2196F3]" />
-                            {selectedFolder || 'General'}
-                          </span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-slate-500">Estimated Output:</span>
-                          <span className="font-mono text-slate-800">
-                            ~{((uploadedVideo?.sizeBytes || 100 * 1024 * 1024) / (1024 * 1024)).toFixed(0)} MB total
-                          </span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-slate-500">Text Overlays:</span>
-                          <span className="text-slate-800">
-                            {textOverlaySettings.top.enabled || textOverlaySettings.bottom.enabled
-                              ? 'Active (Injection Safe)'
-                              : 'None'}
-                          </span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-slate-500">Subfolder:</span>
-                          <span className="text-slate-800">{createSubfolder ? 'Yes' : 'No'}</span>
-                        </div>
+                      <div className="flex flex-wrap items-center gap-1.5 text-[10px] pt-0.5">
+                        <span className="text-slate-500 font-medium">Add tag:</span>
+                        {['{title}', '{part}', '{nn}', '{total}'].map((token) => (
+                          <button
+                            type="button"
+                            key={token}
+                            onClick={() => setFilenameTemplate((prev) => `${prev}_${token}`)}
+                            className="px-1.5 py-0.5 rounded bg-white hover:bg-[#E3F2FD] text-[#0D47A1] font-mono font-bold border border-[#90CAF9]"
+                          >
+                            +{token}
+                          </button>
+                        ))}
                       </div>
                     </div>
                   </div>
 
-                  {submitError && (
-                    <div className="p-4 rounded-xl bg-rose-50 border border-rose-300 text-rose-800 text-xs flex items-center gap-2.5 font-medium">
-                      <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600" />
-                      <span>{submitError}</span>
+                  {/* Quality Selector */}
+                  <div className="flex flex-col gap-2 pt-2 border-t border-[#90CAF9]/40">
+                    <label className="text-xs font-bold text-[#0D47A1] uppercase tracking-wide">
+                      2. Encoding Quality
+                    </label>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      {[
+                        {
+                          id: 'fast',
+                          title: 'Fast Draft',
+                          desc: 'Quick rendering for rapid previews.',
+                          badge: 'Fastest',
+                        },
+                        {
+                          id: 'balanced',
+                          title: 'Balanced (Standard)',
+                          desc: 'Best balance of quality and speed.',
+                          badge: 'Recommended',
+                        },
+                        {
+                          id: 'high',
+                          title: 'High Quality',
+                          desc: 'Crisp output for final social uploads.',
+                          badge: 'Pristine',
+                        },
+                      ].map((preset) => (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          onClick={() => setQualityPreset(preset.id as any)}
+                          className={`p-3 rounded-xl border text-left transition-all btn-pressable ${
+                            qualityPreset === preset.id
+                              ? 'bg-[#E3F2FD] border-2 border-[#2196F3] text-[#0D47A1] shadow-sm'
+                              : 'bg-white border-[#90CAF9]/60 text-slate-700 hover:border-[#2196F3] hover:bg-[#F0F7FF]'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-xs font-bold text-[#0D47A1]">{preset.title}</span>
+                            <span className="text-[9px] font-semibold text-[#0D47A1] bg-[#E3F2FD] border border-[#90CAF9] px-1.5 py-0.2 rounded">
+                              {preset.badge}
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-600 font-medium">{preset.desc}</p>
+                        </button>
+                      ))}
                     </div>
-                  )}
+                  </div>
 
-                  {/* Big Launch Processing Button */}
-                  <div className="pt-2">
+                  {/* Summary & Start Button */}
+                  <div className="bg-[#F0F7FF] p-4 rounded-xl border border-[#90CAF9]/60 flex flex-col gap-3 mt-1">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                      <div>
+                        <span className="text-[10px] text-slate-500 block">Total Clips</span>
+                        <span className="font-bold text-[#0D47A1]">{computedPlan.length} parts</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-slate-500 block">Aspect Ratio</span>
+                        <span className="font-bold text-[#0D47A1]">{selectedRatio}</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-slate-500 block">Destination</span>
+                        <span className="font-bold text-[#0D47A1] capitalize">{destination === 'drive' ? 'Google Drive' : 'Local ZIP'}</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-slate-500 block">Estimated Size</span>
+                        <span className="font-bold text-[#0D47A1]">~{((uploadedVideo?.sizeBytes || 100 * 1024 * 1024) / (1024 * 1024)).toFixed(0)} MB</span>
+                      </div>
+                    </div>
+
+                    {submitError && (
+                      <div className="p-3 rounded-xl bg-rose-50 border border-rose-300 text-rose-800 text-xs flex items-center gap-2 font-medium">
+                        <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600" />
+                        <span>{submitError}</span>
+                      </div>
+                    )}
+
                     <button
+                      type="button"
                       disabled={isSubmittingJob || computedPlan.length === 0}
                       onClick={handleStartProcessing}
-                      className="btn-pressable w-full py-4 rounded-xl bg-[#2196F3] hover:bg-[#1E88E5] text-white font-bold text-sm shadow-lg shadow-[#2196F3]/30 flex items-center justify-center gap-2.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="btn-pressable w-full py-3.5 rounded-xl bg-[#2196F3] hover:bg-[#1E88E5] text-white font-bold text-sm shadow-md shadow-[#2196F3]/30 flex items-center justify-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                     >
                       {isSubmittingJob ? (
                         <>
                           <RotateCw className="w-4 h-4 animate-spin" />
-                          <span>Dispatching Job to BullMQ Queue...</span>
+                          <span>Dispatching Clips to Processing Engine...</span>
                         </>
                       ) : (
                         <>
@@ -1746,30 +1694,53 @@ export default function HomePage() {
                         </>
                       )}
                     </button>
-                    <p className="text-[11px] text-slate-500 font-medium text-center mt-2">
-                      Rendering runs asynchronously on the background worker. You can monitor progress with live stderr logs.
+                    <p className="text-[10px] text-slate-500 text-center font-medium">
+                      Processing runs in the background. You will be redirected to the Queue view to monitor live progress.
                     </p>
                   </div>
                 </div>
               )}
 
               {/* Wizard navigation footer */}
-              {currentStep < 6 && (
-                <div className="flex items-center justify-between pt-2">
+              {currentStep < 5 ? (
+                <div className="flex items-center justify-between pt-3 border-t border-[#90CAF9]/40 mt-3">
                   <button
+                    type="button"
                     disabled={currentStep === 1}
                     onClick={() => setCurrentStep((s) => Math.max(1, s - 1))}
-                    className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:text-[#0D47A1] bg-white border border-[#90CAF9]/60 hover:bg-[#F0F7FF] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:text-[#0D47A1] bg-white border border-[#90CAF9]/60 hover:bg-[#F0F7FF] transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 cursor-pointer"
                   >
+                    <ArrowLeft className="w-3.5 h-3.5" />
                     Previous Step
                   </button>
                   <button
-                    onClick={() => setCurrentStep((s) => Math.min(6, s + 1))}
-                    className="btn-pressable flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#2196F3] hover:bg-[#1E88E5] text-white font-semibold text-xs shadow-md shadow-[#2196F3]/25"
+                    type="button"
+                    disabled={currentStep === 1 && !uploadedVideo}
+                    onClick={() => setCurrentStep((s) => Math.min(5, s + 1))}
+                    className="btn-pressable flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#2196F3] hover:bg-[#1E88E5] text-white font-semibold text-xs shadow-md shadow-[#2196F3]/25 transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                   >
-                    Continue
+                    <span>
+                      {currentStep === 1 && 'Continue to Framing'}
+                      {currentStep === 2 && 'Continue to Clips'}
+                      {currentStep === 3 && 'Continue to Style'}
+                      {currentStep === 4 && 'Continue to Export'}
+                    </span>
                     <ArrowRight className="w-3.5 h-3.5" />
                   </button>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between pt-3 border-t border-[#90CAF9]/40 mt-3">
+                  <button
+                    type="button"
+                    onClick={() => setCurrentStep(4)}
+                    className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:text-[#0D47A1] bg-white border border-[#90CAF9]/60 hover:bg-[#F0F7FF] transition-all flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <ArrowLeft className="w-3.5 h-3.5" />
+                    Back to Style
+                  </button>
+                  <span className="text-[11px] text-slate-500 font-medium">
+                    Ready to render {computedPlan.length} clips
+                  </span>
                 </div>
               )}
             </div>
