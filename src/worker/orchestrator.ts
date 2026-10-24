@@ -6,7 +6,6 @@ import { partRenderer } from '../lib/renderer/renderPart';
 import { enqueueVideoJob } from '../lib/queue';
 import { logger } from '../lib/logger/logger';
 import { driveService } from '../lib/services/driveService';
-import { geminiSubtitleService } from '../lib/services/geminiSubtitleService';
 import path from 'path';
 import fs from 'fs';
 import { config } from '../lib/config';
@@ -99,84 +98,6 @@ export class PipelineOrchestrator {
         }
       );
 
-      // Part-by-part AI Subtitles: Extract and transcribe ONLY this part's audio slice with Gemini AI
-      let partSrtPath: string | undefined = undefined;
-      const aiSubsConfig = job.settings.aiSubtitles || (job.settings as any).textOverlay?.aiSubtitles;
-      if (aiSubsConfig?.enabled) {
-        try {
-          const jobWorkDir = path.join(config.workDir, jobId);
-          fs.mkdirSync(jobWorkDir, { recursive: true });
-          const srtPath = path.join(jobWorkDir, `part_${part.index}_subtitles.srt`);
-
-          // 1. If subtitles already pre-generated in Step 4 wizard, slice for this part
-          if (aiSubsConfig.subtitles && aiSubsConfig.subtitles.length > 0) {
-            const hasSubs = geminiSubtitleService.generatePartSrt(
-              aiSubsConfig.subtitles,
-              part.start,
-              part.start + part.duration,
-              srtPath
-            );
-            if (hasSubs) {
-              partSrtPath = srtPath;
-              logger.render(
-                'info',
-                'PART_SUBTITLE_SLICED',
-                `Applied ${aiSubsConfig.subtitles.length} global subtitle cues to Part ${part.index}`,
-                jobId,
-                part.index
-              );
-            }
-          }
-
-          // 2. If no pre-generated subtitles exist, transcribe this part's audio slice with Gemini AI on demand
-          if (!partSrtPath) {
-            logger.render(
-              'info',
-              'PART_SUBTITLE_TRANSCRIBE_START',
-              `Transcribing audio for Part ${part.index}/${totalParts} (${part.start}s - ${part.start + part.duration}s) with Gemini AI...`,
-              jobId,
-              part.index
-            );
-
-            const partSubs = await geminiSubtitleService.generateSubtitles(
-              job.source.storedPath,
-              undefined,
-              part.start,
-              part.duration
-            );
-
-            if (partSubs && partSubs.length > 0) {
-              geminiSubtitleService.writeSrtFile(partSubs, srtPath);
-              partSrtPath = srtPath;
-              logger.render(
-                'info',
-                'PART_SUBTITLE_TRANSCRIBE_COMPLETE',
-                `Generated ${partSubs.length} subtitle cues for Part ${part.index}`,
-                jobId,
-                part.index
-              );
-            } else {
-              logger.render(
-                'warn',
-                'PART_SUBTITLE_NO_CUES',
-                `No speech cues returned by Gemini AI for Part ${part.index}`,
-                jobId,
-                part.index
-              );
-            }
-          }
-        } catch (subErr: unknown) {
-          const msg = subErr instanceof Error ? subErr.message : String(subErr);
-          logger.render(
-            'warn',
-            'PART_SUBTITLE_TRANSCRIBE_FAILED',
-            `Subtitle generation failed for Part ${part.index}, proceeding with render: ${msg}`,
-            jobId,
-            part.index
-          );
-        }
-      }
-
       try {
         let lastRenderProgress = -1;
         let lastRenderSaveTime = 0;
@@ -192,8 +113,6 @@ export class PipelineOrchestrator {
           sourceProbe: job.source.probe || ({} as any),
           outputFormat: job.settings.outputFormat,
           textOverlay: job.settings.textOverlay,
-          aiSubtitles: aiSubsConfig,
-          partSrtPath,
           onProgress: async (percent) => {
             part.renderProgress = percent;
             const now = Date.now();
@@ -355,12 +274,6 @@ export class PipelineOrchestrator {
         failedCount++;
         job.counts.failed = failedCount;
         await job.save();
-      } finally {
-        if (partSrtPath && fs.existsSync(partSrtPath)) {
-          try {
-            fs.unlinkSync(partSrtPath);
-          } catch {}
-        }
       }
     }
 

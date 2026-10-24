@@ -63,7 +63,7 @@ import { ThreadsPublisherView } from '@/components/ThreadsPublisherView';
 import { InstagramPublisherView } from '@/components/InstagramPublisherView';
 import { WaterfallSyndicationView } from '@/components/WaterfallSyndicationView';
 import { VideoProbeData, IJob } from '@/shared/types';
-import { PartPlan, TextOverlaySettings, AISubtitleSettings } from '@/shared/schemas';
+import { PartPlan, TextOverlaySettings } from '@/shared/schemas';
 import { CustomSelect } from '@/components/ui/CustomSelect';
 import { NoticeModal } from '@/components/ui/NoticeModal';
 
@@ -188,16 +188,6 @@ export default function HomePage() {
     },
     showSafeZoneGuide: true,
     themePreset: 'tiktok-viral',
-  });
-
-  const [aiSubtitlesSettings, setAiSubtitlesSettings] = useState<AISubtitleSettings>({
-    enabled: false,
-    subtitles: [],
-    fontSize: 22,
-    fontColor: '#FFFFFF',
-    outlineColor: '#000000',
-    outlineWidth: 2,
-    marginV: 35,
   });
 
   // Step E Destination & Output Settings state
@@ -453,14 +443,6 @@ export default function HomePage() {
             perPartTexts: detected.map((c: any) => c.hookHeadline),
           },
         }));
-
-        if (data.subtitles && data.subtitles.length > 0) {
-          setAiSubtitlesSettings((prev) => ({
-            ...prev,
-            enabled: true,
-            subtitles: data.subtitles,
-          }));
-        }
       }
 
       setNotice({
@@ -534,7 +516,7 @@ export default function HomePage() {
           maxPartsLimit: 10000,
         },
         textOverlay: textOverlaySettings,
-        aiSubtitles: aiSubtitlesSettings,
+        aiSubtitles: { enabled: false, subtitles: [] },
       };
 
       const res = await fetch('/api/jobs', {
@@ -585,9 +567,6 @@ export default function HomePage() {
     }
     if (job.settings?.textOverlay) {
       setTextOverlaySettings(job.settings.textOverlay);
-    }
-    if (job.settings?.aiSubtitles) {
-      setAiSubtitlesSettings(job.settings.aiSubtitles);
     }
 
     setActiveTab('new-job');
@@ -1372,8 +1351,6 @@ export default function HomePage() {
                   partCount={computedPlan.length || 5}
                   originalFilename={uploadedVideo?.originalFilename}
                   sanitizedFilename={uploadedVideo?.sanitizedFilename}
-                  aiSubtitles={aiSubtitlesSettings}
-                  onAiSubtitlesChange={setAiSubtitlesSettings}
                   uploadedVideoId={uploadedVideo?.uploadId}
                 />
               )}
@@ -1736,16 +1713,6 @@ export default function HomePage() {
                           </span>
                         </div>
                         <div className="flex justify-between">
-                          <span className="text-slate-500">AI Subtitles:</span>
-                          <span className={aiSubtitlesSettings.enabled ? 'text-emerald-700 font-bold' : 'text-slate-500'}>
-                            {aiSubtitlesSettings.enabled
-                              ? aiSubtitlesSettings.subtitles?.length
-                                ? `Active (${aiSubtitlesSettings.subtitles.length} cues)`
-                                : 'Active (Gemini AI per-part)'
-                              : 'Disabled'}
-                          </span>
-                        </div>
-                        <div className="flex justify-between">
                           <span className="text-slate-500">Subfolder:</span>
                           <span className="text-slate-800">{createSubfolder ? 'Yes' : 'No'}</span>
                         </div>
@@ -1816,7 +1783,6 @@ export default function HomePage() {
                 focalPoint={focalPoint}
                 probe={uploadedVideo?.probe}
                 textOverlay={textOverlaySettings}
-                aiSubtitles={aiSubtitlesSettings}
                 showSafeZone={showSafeZone}
                 onToggleSafeZone={() => setShowSafeZone(!showSafeZone)}
                 totalParts={computedPlan.length || 5}
@@ -1849,16 +1815,10 @@ export default function HomePage() {
                     {textOverlaySettings.top.enabled ? 'Enabled' : 'Disabled'}
                   </span>
                 </div>
-                <div className="flex justify-between pb-1 border-b border-[#90CAF9]/30">
+                <div className="flex justify-between">
                   <span className="font-semibold text-slate-500">Bottom Text:</span>
                   <span className="text-slate-800 font-semibold">
                     {textOverlaySettings.bottom.enabled ? 'Enabled' : 'Disabled'}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="font-semibold text-slate-500">AI Subtitles:</span>
-                  <span className={aiSubtitlesSettings.enabled ? 'text-emerald-700 font-bold' : 'text-slate-500'}>
-                    {aiSubtitlesSettings.enabled ? 'Enabled (Gemini)' : 'Disabled'}
                   </span>
                 </div>
               </div>

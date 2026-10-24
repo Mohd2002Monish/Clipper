@@ -8,7 +8,6 @@ import { OutputFormatSettings, TextOverlaySettings, AISubtitleSettings } from '.
 import { VideoProbeData } from '../../shared/types';
 import { evaluateTextTokens, wrapTextForOverlay } from './textProcessor';
 import { writeSafeTextFile } from './fontManager';
-import { geminiSubtitleService } from '../services/geminiSubtitleService';
 import { logger } from '../logger/logger';
 import { config } from '../config';
 import { autoCropService } from './autoCropService';
@@ -143,35 +142,6 @@ export class PartRenderer {
         textRenderConfig.bottomTextFilePath = bottomFilePath;
         textRenderConfig.bottomStyle = textOverlay.bottom;
         createdTextFiles.push(bottomFilePath);
-      }
-    }
-
-    // Subtitles preparation
-    if (aiSubtitles?.enabled) {
-      let effectiveSrtPath = params.partSrtPath;
-      if (!effectiveSrtPath && aiSubtitles.subtitles && aiSubtitles.subtitles.length > 0) {
-        const srtPath = path.join(jobWorkDir, `part_${partIndex}_subtitles.srt`);
-        const hasSubs = geminiSubtitleService.generatePartSrt(
-          aiSubtitles.subtitles,
-          start,
-          start + duration,
-          srtPath
-        );
-        if (hasSubs) {
-          effectiveSrtPath = srtPath;
-          createdTextFiles.push(srtPath);
-        }
-      }
-
-      if (effectiveSrtPath && fs.existsSync(effectiveSrtPath)) {
-        textRenderConfig.subtitleSrtFilePath = effectiveSrtPath;
-        textRenderConfig.subtitleStyle = {
-          fontSize: aiSubtitles.fontSize || 22,
-          fontColor: aiSubtitles.fontColor || '#FFFFFF',
-          outlineColor: aiSubtitles.outlineColor || '#000000',
-          outlineWidth: aiSubtitles.outlineWidth || 2,
-          marginV: aiSubtitles.marginV || 35,
-        };
       }
     }
 

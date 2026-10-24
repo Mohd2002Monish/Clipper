@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Film, Activity, Eye, EyeOff, RefreshCw } from 'lucide-react';
-import { AspectRatioPreset, ReframeMode, TextOverlaySettings, AISubtitleSettings } from '@/shared/schemas';
+import { AspectRatioPreset, ReframeMode, TextOverlaySettings } from '@/shared/schemas';
 import { VideoProbeData } from '@/shared/types';
 import { evaluateTextTokens } from '@/lib/renderer/textProcessor';
 
@@ -14,7 +14,6 @@ interface PreviewCanvasProps {
   focalPoint?: 'left' | 'center' | 'right' | 'auto_face';
   probe?: VideoProbeData;
   textOverlay?: TextOverlaySettings;
-  aiSubtitles?: AISubtitleSettings;
   showSafeZone?: boolean;
   onToggleSafeZone?: () => void;
   previewPartIndex?: number;
@@ -29,7 +28,6 @@ export function PreviewCanvas({
   focalPoint = 'center',
   probe,
   textOverlay,
-  aiSubtitles,
   showSafeZone = true,
   onToggleSafeZone,
   previewPartIndex = 1,
@@ -246,32 +244,6 @@ export function PreviewCanvas({
           </div>
         )}
 
-        {/* Live AI Subtitles Layer */}
-        {aiSubtitles?.enabled && (
-          <div
-            className="absolute z-30 pointer-events-none px-4 text-center w-full"
-            style={{
-              bottom: `${Math.min(26, Math.max(6, (aiSubtitles.marginV || 35) / 5))}%`,
-              textAlign: 'center',
-            }}
-          >
-            <span
-              className="inline-block rounded px-2.5 py-1 font-bold transition-all shadow-md backdrop-blur-sm"
-              style={{
-                fontFamily: 'Noto Sans, sans-serif',
-                fontSize: `${Math.max(10, Math.min(18, (aiSubtitles.fontSize || 22) * 0.55))}px`,
-                color: aiSubtitles.fontColor || '#FFFFFF',
-                textShadow: `0 0 ${(aiSubtitles.outlineWidth || 2) * 2}px ${aiSubtitles.outlineColor || '#000000'}`,
-                backgroundColor: 'rgba(0,0,0,0.65)',
-              }}
-            >
-              {aiSubtitles.subtitles && aiSubtitles.subtitles.length > 0
-                ? `"${aiSubtitles.subtitles[0].text}"`
-                : 'AI Subtitles (Gemini)'}
-            </span>
-          </div>
-        )}
-
         {/* Safe-Zone Guide Overlay */}
         {showSafeZone && aspectRatio === '9:16' && (
           <div className="absolute inset-x-3 top-4 bottom-14 border border-dashed border-rose-400 rounded-lg pointer-events-none flex flex-col justify-between p-1.5 z-20">
@@ -309,14 +281,6 @@ export function PreviewCanvas({
             {textOverlay?.top?.enabled || textOverlay?.bottom?.enabled
               ? `${textOverlay?.top?.enabled ? 'Top' : ''} ${textOverlay?.top?.enabled && textOverlay?.bottom?.enabled ? '& ' : ''}${textOverlay?.bottom?.enabled ? 'Bottom' : ''}`
               : 'None'}
-          </span>
-        </div>
-        <div className="flex justify-between">
-          <span className="text-slate-500">AI Subtitles:</span>
-          <span className="text-[#0D47A1] font-bold">
-            {aiSubtitles?.enabled
-              ? `${aiSubtitles.subtitles?.length ? `${aiSubtitles.subtitles.length} lines (Gemini)` : 'Enabled (Gemini)'}`
-              : 'Disabled'}
           </span>
         </div>
       </div>

@@ -26,7 +26,7 @@ import {
   X,
   Plus
 } from 'lucide-react';
-import { TextOverlaySettings, TextSlotConfig, AISubtitleSettings, SubtitleItem } from '@/shared/schemas';
+import { TextOverlaySettings, TextSlotConfig } from '@/shared/schemas';
 import { SUPPORTED_FONTS } from '@/shared/constants';
 import { CustomSelect } from './ui/CustomSelect';
 import { THEME_PRESETS, applyThemeToSettings } from '@/shared/themes';
@@ -38,8 +38,6 @@ interface TextOverlayEditorProps {
   partCount: number;
   originalFilename?: string;
   sanitizedFilename?: string;
-  aiSubtitles?: AISubtitleSettings;
-  onAiSubtitlesChange?: (newSubtitles: AISubtitleSettings) => void;
   uploadedVideoId?: string;
 }
 
@@ -49,16 +47,11 @@ export function TextOverlayEditor({
   partCount,
   originalFilename = 'my_video.mp4',
   sanitizedFilename,
-  aiSubtitles,
-  onAiSubtitlesChange,
   uploadedVideoId,
 }: TextOverlayEditorProps) {
-  const [activeSlot, setActiveSlot] = useState<'top' | 'bottom' | 'subtitles'>('top');
+  const [activeSlot, setActiveSlot] = useState<'top' | 'bottom'>('top');
   const [pasteModalSlot, setPasteModalSlot] = useState<'top' | 'bottom' | null>(null);
   const [multilineInput, setMultilineInput] = useState('');
-  const [isTranscribing, setIsTranscribing] = useState(false);
-  const [transcribeError, setTranscribeError] = useState<string | null>(null);
-  const [transcribeSuccess, setTranscribeSuccess] = useState<string | null>(null);
 
   // Theme presets & Custom theme states
   const [availableThemes, setAvailableThemes] = useState<IThemePreset[]>(THEME_PRESETS);
@@ -95,11 +88,8 @@ export function TextOverlayEditor({
       return;
     }
 
-    const { newOverlay, newSubs } = applyThemeToSettings(theme, settings, effectiveSubtitles);
+    const { newOverlay } = applyThemeToSettings(theme, settings);
     onChange(newOverlay);
-    if (newSubs && onAiSubtitlesChange) {
-      onAiSubtitlesChange(newSubs);
-    }
   };
 
   const handleSaveCustomTheme = async (e: React.FormEvent) => {
@@ -125,7 +115,6 @@ export function TextOverlayEditor({
           },
           top: settings.top,
           bottom: settings.bottom,
-          aiSubtitles: effectiveSubtitles,
         }),
       });
 
@@ -151,61 +140,6 @@ export function TextOverlayEditor({
     }
   };
 
-  const effectiveSubtitles: AISubtitleSettings = aiSubtitles || {
-    enabled: false,
-    subtitles: [],
-    fontSize: 22,
-    fontColor: '#FFFFFF',
-    outlineColor: '#000000',
-    outlineWidth: 2,
-    marginV: 35,
-  };
-
-  const updateAiSubtitles = (partial: Partial<AISubtitleSettings>) => {
-    if (onAiSubtitlesChange) {
-      onAiSubtitlesChange({
-        ...effectiveSubtitles,
-        ...partial,
-      });
-    }
-  };
-
-  const handleTranscribeAudio = async () => {
-    if (!uploadedVideoId && !sanitizedFilename) {
-      setTranscribeError('Please upload a video in Step 1 first before transcribing.');
-      return;
-    }
-    setIsTranscribing(true);
-    setTranscribeError(null);
-    setTranscribeSuccess(null);
-    try {
-      const res = await fetch('/api/subtitles/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          uploadId: uploadedVideoId,
-          sanitizedFilename,
-          originalFilename,
-          startSec: 0,
-          durationSec: 60,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to generate subtitles with Gemini AI.');
-      }
-      updateAiSubtitles({
-        enabled: true,
-        subtitles: data.subtitles || [],
-      });
-      setTranscribeSuccess(`Successfully transcribed ${data.count || 0} timestamped subtitles with Gemini AI!`);
-    } catch (err: unknown) {
-      setTranscribeError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setIsTranscribing(false);
-    }
-  };
-
   const currentSlotConfig = activeSlot === 'top' ? settings.top : settings.bottom;
 
   const updateSlot = (slot: 'top' | 'bottom', partial: Partial<TextSlotConfig>) => {
@@ -219,7 +153,6 @@ export function TextOverlayEditor({
   };
 
   const insertToken = (token: string) => {
-    if (activeSlot === 'subtitles') return;
     const currentText = currentSlotConfig.text || '';
     updateSlot(activeSlot, { text: `${currentText} ${token}`.trim() });
   };
@@ -236,7 +169,6 @@ export function TextOverlayEditor({
   };
 
   const fillAllWithCurrent = () => {
-    if (activeSlot === 'subtitles') return;
     const currentText = currentSlotConfig.text || '';
     const repeated = Array(partCount).fill(currentText);
     updateSlot(activeSlot, { perPartTexts: repeated });
@@ -249,7 +181,7 @@ export function TextOverlayEditor({
         <div>
           <h3 className="text-base font-bold text-[#0D47A1] mb-0.5">Text Overlays & Titles</h3>
           <p className="text-xs text-slate-600">
-            Add branded captions, episode badges, and subtitles with multi-language font shaping.
+            Add branded captions, episode badges, and header/footer overlays with multi-language font shaping.
           </p>
         </div>
 
@@ -285,22 +217,6 @@ export function TextOverlayEditor({
             />
             Bottom Text Slot
           </button>
-          <button
-            onClick={() => setActiveSlot('subtitles')}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-              activeSlot === 'subtitles'
-                ? 'bg-[#2196F3] text-white shadow-sm'
-                : 'text-slate-600 hover:text-[#0D47A1]'
-            }`}
-          >
-            <span
-              className={`w-2 h-2 rounded-full ${
-                effectiveSubtitles.enabled ? 'bg-emerald-400 animate-pulse' : 'bg-slate-300'
-              }`}
-            />
-            <Sparkles className="w-3.5 h-3.5" />
-            AI Subtitles (Gemini)
-          </button>
         </div>
       </div>
 
@@ -311,7 +227,7 @@ export function TextOverlayEditor({
             <Palette className="w-4 h-4 text-[#2196F3]" />
             <h4 className="text-xs font-bold text-[#0D47A1]">Video &amp; Caption Theme Presets</h4>
             <span className="text-[10px] text-slate-500 font-medium">
-              (One-click viral styling for titles, boxes &amp; subtitles)
+              (One-click viral styling for titles, boxes &amp; badges)
             </span>
           </div>
 
@@ -387,238 +303,7 @@ export function TextOverlayEditor({
       </div>
 
       {/* Active Slot Configuration */}
-      {activeSlot === 'subtitles' ? (
-        <div className="flex flex-col gap-5">
-          {/* Enable AI Subtitles Toggle */}
-          <div className="flex items-center justify-between bg-[#F0F7FF] p-4 rounded-xl border border-[#90CAF9]/60">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-[#E3F2FD] border border-[#90CAF9] flex items-center justify-center text-[#2196F3] font-bold shadow-sm">
-                <Sparkles className="w-4 h-4" />
-              </div>
-              <div>
-                <p className="text-xs font-bold text-[#0D47A1]">Enable AI Subtitles (Gemini)</p>
-                <p className="text-[11px] text-slate-600">
-                  Transcribes speech-to-text with exact timestamps and burns subtitles at the bottom of each video part.
-                </p>
-              </div>
-            </div>
-            <label className="relative inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={effectiveSubtitles.enabled}
-                onChange={(e) => updateAiSubtitles({ enabled: e.target.checked })}
-                className="sr-only peer"
-              />
-              <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#2196F3]" />
-            </label>
-          </div>
-
-          {effectiveSubtitles.enabled && (
-            <div className="flex flex-col gap-5">
-              {/* Transcription Trigger Card */}
-              <div className="bg-[#F0F7FF] p-4 rounded-xl border border-[#90CAF9]/60 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-[#E3F2FD] border border-[#90CAF9] flex items-center justify-center text-[#2196F3] shrink-0">
-                    <Mic className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <p className="text-xs font-bold text-[#0D47A1]">Generate Subtitles with Gemini AI</p>
-                    <p className="text-[11px] text-slate-600">
-                      {effectiveSubtitles.subtitles && effectiveSubtitles.subtitles.length > 0
-                        ? `${effectiveSubtitles.subtitles.length} timestamped subtitle cues generated and ready.`
-                        : 'Extracts audio from uploaded video and generates timestamped subtitles using Google Gemini.'}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2 w-full sm:w-auto">
-                  <button
-                    onClick={handleTranscribeAudio}
-                    disabled={isTranscribing || (!uploadedVideoId && !sanitizedFilename)}
-                    className={`flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-md ${
-                      isTranscribing || (!uploadedVideoId && !sanitizedFilename)
-                        ? 'bg-slate-200 text-slate-400 cursor-not-allowed border border-slate-300'
-                        : 'bg-[#2196F3] hover:bg-[#1E88E5] text-white border border-[#2196F3] shadow-[#2196F3]/25'
-                    }`}
-                  >
-                    {isTranscribing ? (
-                      <>
-                        <RotateCw className="w-3.5 h-3.5 animate-spin" />
-                        Transcribing Audio with Gemini...
-                      </>
-                    ) : (
-                      <>
-                        <Sparkles className="w-3.5 h-3.5" />
-                        {effectiveSubtitles.subtitles && effectiveSubtitles.subtitles.length > 0
-                          ? 'Re-transcribe Audio'
-                          : 'Transcribe Video Audio'}
-                      </>
-                    )}
-                  </button>
-                  {effectiveSubtitles.subtitles && effectiveSubtitles.subtitles.length > 0 && (
-                    <button
-                      onClick={() => updateAiSubtitles({ subtitles: [] })}
-                      title="Clear subtitles"
-                      className="p-2 rounded-xl bg-white hover:bg-rose-50 text-rose-600 border border-rose-200 transition-all shadow-sm"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* Informational hints */}
-              {!uploadedVideoId && !sanitizedFilename && (
-                <div className="flex items-center gap-2 p-3 bg-amber-50 rounded-xl border border-amber-200 text-amber-800 text-xs font-medium">
-                  <Info className="w-4 h-4 shrink-0 text-amber-600" />
-                  <span>Please upload a video in Step 1 to transcribe audio here, or start render and worker will auto-transcribe each part one-by-one during processing.</span>
-                </div>
-              )}
-
-              {transcribeError && (
-                <div className="flex items-center gap-2 p-3 bg-rose-50 rounded-xl border border-rose-200 text-rose-800 text-xs font-medium">
-                  <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600" />
-                  <span>{transcribeError}</span>
-                </div>
-              )}
-
-              {transcribeSuccess && (
-                <div className="flex items-center gap-2 p-3 bg-emerald-50 rounded-xl border border-emerald-200 text-emerald-800 text-xs font-medium">
-                  <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
-                  <span>{transcribeSuccess}</span>
-                </div>
-              )}
-
-              {/* Subtitle Cue Inspector (if subtitles exist) */}
-              {effectiveSubtitles.subtitles && effectiveSubtitles.subtitles.length > 0 && (
-                <div className="flex flex-col gap-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-[#0D47A1]">
-                      Generated Subtitle Segments ({effectiveSubtitles.subtitles.length} total):
-                    </span>
-                    <span className="text-[11px] text-slate-500 font-mono">
-                      Auto-sliced & synced per split part
-                    </span>
-                  </div>
-                  <div className="overflow-hidden rounded-xl border border-[#90CAF9]/60 bg-white max-h-[200px] overflow-y-auto shadow-sm">
-                    <table className="w-full text-left text-xs">
-                      <thead className="bg-[#E3F2FD] text-[#0D47A1] uppercase text-[10px] font-mono font-bold sticky top-0 border-b border-[#90CAF9]/40">
-                        <tr>
-                          <th className="py-2 px-3 w-16">#</th>
-                          <th className="py-2 px-3 w-36">Time Window</th>
-                          <th className="py-2 px-3">Subtitle Text</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-[#90CAF9]/30 font-mono">
-                        {effectiveSubtitles.subtitles.map((cue, idx) => {
-                          const startMin = Math.floor(cue.start / 60);
-                          const startSec = (cue.start % 60).toFixed(1);
-                          const endMin = Math.floor(cue.end / 60);
-                          const endSec = (cue.end % 60).toFixed(1);
-                          return (
-                            <tr key={idx} className="hover:bg-[#F0F7FF]/50 transition-colors">
-                              <td className="py-1.5 px-3 text-slate-400 text-[11px] font-bold">
-                                {idx + 1}
-                              </td>
-                              <td className="py-1.5 px-3 text-[#0D47A1] font-semibold text-[11px]">
-                                {`${startMin}:${startSec.padStart(4, '0')} - ${endMin}:${endSec.padStart(4, '0')}`}
-                              </td>
-                              <td className="py-1.5 px-3 text-slate-700 font-sans font-medium text-xs">
-                                {cue.text}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-
-              {/* Subtitle Appearance & Placement Controls */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 pt-2 border-t border-[#90CAF9]/40">
-                {/* Font Size */}
-                <div>
-                  <div className="flex justify-between items-center mb-1">
-                    <label className="text-[11px] font-bold text-[#0D47A1]">Subtitle Font Size</label>
-                    <span className="text-[11px] text-[#0D47A1] font-mono font-bold">{effectiveSubtitles.fontSize || 22}px</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="14"
-                    max="44"
-                    value={effectiveSubtitles.fontSize || 22}
-                    onChange={(e) => updateAiSubtitles({ fontSize: Number(e.target.value) })}
-                    className="w-full accent-[#2196F3]"
-                  />
-                </div>
-
-                {/* Font Color */}
-                <div>
-                  <label className="text-[11px] font-bold text-[#0D47A1] block mb-1">
-                    Font Color
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="color"
-                      value={effectiveSubtitles.fontColor || '#FFFFFF'}
-                      onChange={(e) => updateAiSubtitles({ fontColor: e.target.value })}
-                      className="w-8 h-8 rounded border-0 bg-transparent cursor-pointer"
-                    />
-                    <input
-                      type="text"
-                      value={effectiveSubtitles.fontColor || '#FFFFFF'}
-                      onChange={(e) => updateAiSubtitles({ fontColor: e.target.value })}
-                      className="w-24 bg-white border border-[#90CAF9] rounded-lg px-2.5 py-1 text-xs text-[#0D47A1] font-mono font-bold"
-                    />
-                  </div>
-                </div>
-
-                {/* Outline Width & Color */}
-                <div>
-                  <div className="flex justify-between items-center mb-1">
-                    <label className="text-[11px] font-bold text-[#0D47A1]">Outline Width</label>
-                    <span className="text-[11px] text-[#0D47A1] font-mono font-bold">{effectiveSubtitles.outlineWidth || 2}px</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="range"
-                      min="0"
-                      max="6"
-                      value={effectiveSubtitles.outlineWidth || 2}
-                      onChange={(e) => updateAiSubtitles({ outlineWidth: Number(e.target.value) })}
-                      className="w-full accent-[#2196F3]"
-                    />
-                    <input
-                      type="color"
-                      value={effectiveSubtitles.outlineColor || '#000000'}
-                      onChange={(e) => updateAiSubtitles({ outlineColor: e.target.value })}
-                      className="w-6 h-6 rounded border-0 bg-transparent cursor-pointer"
-                    />
-                  </div>
-                </div>
-
-                {/* Bottom Margin (MarginV) */}
-                <div>
-                  <div className="flex justify-between items-center mb-1">
-                    <label className="text-[11px] font-bold text-[#0D47A1]">Bottom Margin</label>
-                    <span className="text-[11px] text-[#0D47A1] font-mono font-bold">{effectiveSubtitles.marginV || 35}px</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="10"
-                    max="120"
-                    value={effectiveSubtitles.marginV || 35}
-                    onChange={(e) => updateAiSubtitles({ marginV: Number(e.target.value) })}
-                    className="w-full accent-[#2196F3]"
-                  />
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      ) : (
-        <div className="flex flex-col gap-5">
+      <div className="flex flex-col gap-5">
           {/* Enable Slot Toggle */}
           <div className="flex items-center justify-between bg-[#F0F7FF] p-4 rounded-xl border border-[#90CAF9]/60">
             <div className="flex items-center gap-3">
@@ -952,7 +637,6 @@ export function TextOverlayEditor({
           </div>
         )}
       </div>
-      )}
 
       {/* Multi-Line Paste Modal */}
       {pasteModalSlot && (
@@ -1032,7 +716,7 @@ export function TextOverlayEditor({
                   type="text"
                   value={customThemeDesc}
                   onChange={(e) => setCustomThemeDesc(e.target.value)}
-                  placeholder="e.g. Yellow headers with solid black box and 24pt subtitles"
+                  placeholder="e.g. Yellow headers with solid black box and bold footer"
                   className="w-full px-3 py-2 text-xs text-slate-800 bg-white border border-[#90CAF9] rounded-xl focus:outline-none focus:border-[#2196F3] focus:ring-2 focus:ring-[#2196F3]/20"
                 />
               </div>
@@ -1042,7 +726,6 @@ export function TextOverlayEditor({
                 <div>• Top font: {settings.top.fontFamily} ({settings.top.fontSize}px, {settings.top.fontColor})</div>
                 <div>• Bottom font: {settings.bottom.fontFamily} ({settings.bottom.fontSize}px, {settings.bottom.fontColor})</div>
                 <div>• Background Boxing: {settings.top.bgBoxEnabled ? `Enabled (${Math.round(settings.top.bgBoxOpacity * 100)}%)` : 'Off'}</div>
-                <div>• Subtitles Style: {effectiveSubtitles.fontSize}px, {effectiveSubtitles.fontColor}</div>
               </div>
 
               <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100">
