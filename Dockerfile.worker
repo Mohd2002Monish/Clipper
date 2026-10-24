@@ -1,0 +1,24 @@
+FROM node:20-bookworm-slim AS base
+
+# Install FFmpeg, FFprobe, and Noto fonts (Hindi, Urdu, Arabic, CJK, Emoji)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    fonts-noto-core \
+    fonts-noto-cjk \
+    fonts-noto-color-emoji \
+    fontconfig \
+    ca-certificates \
+    && fc-cache -f -v \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy dependency manifests
+COPY package*.json ./
+RUN npm ci
+
+# Copy application source
+COPY . .
+
+# Run worker using tsx for zero-transpile direct execution
+CMD ["npx", "tsx", "src/worker/index.ts"]

@@ -1,0 +1,89 @@
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: videotimmer-api
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - MONGODB_URI=mongodb://mongo:27017/videotimmer
+      - REDIS_URL=redis://redis:6379
+      - STORAGE_DIR=/app/storage
+      - LOG_DIR=/app/logs
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+      - GOOGLE_REDIRECT_URI=${GOOGLE_REDIRECT_URI:-http://localhost:3000/api/drive/callback}
+      - GOOGLE_DEFAULT_FOLDER_ID=${GOOGLE_DEFAULT_FOLDER_ID:-}
+      - ENCRYPTION_SECRET=${ENCRYPTION_SECRET:-videotimmer-dev-encryption-key-32b}
+      - AUTH_SECRET=${AUTH_SECRET:-videotimmer-auth-secret}
+    volumes:
+      - storage-data:/app/storage
+      - logs-data:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: videotimmer-worker
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - MONGODB_URI=mongodb://mongo:27017/videotimmer
+      - REDIS_URL=redis://redis:6379
+      - STORAGE_DIR=/app/storage
+      - LOG_DIR=/app/logs
+      - WORKER_CONCURRENCY=${WORKER_CONCURRENCY:-2}
+      - ENCRYPTION_SECRET=${ENCRYPTION_SECRET:-videotimmer-dev-encryption-key-32b}
+    volumes:
+      - storage-data:/app/storage
+      - logs-data:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+
+  redis:
+    image: redis:7-alpine
+    container_name: videotimmer-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  mongo:
+    image: mongo:7
+    container_name: videotimmer-mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  redis-data:
+  mongo-data:
+  storage-data:
+  logs-data:

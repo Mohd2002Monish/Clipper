@@ -1,0 +1,518 @@
+================================================================================
+VIDEO SPLITTER & REFRAMER WEB APP - BUILD SPECIFICATION
+================================================================================
+This spec is written so a coding agent can build the app step by step.
+It contains no code.
+
+--------------------------------------------------------------------------------
+1. WHAT THE APP DOES
+--------------------------------------------------------------------------------
+1. The user uploads one video.
+2. The user picks an output aspect ratio (for example 9:16 for Shorts/Reels).
+   If the source does not match, a REFRAME MODE decides what happens. The most
+   popular one: the landscape video sits centered over a blurred, zoomed copy
+   of itself, with a caption below.
+3. The user chooses how to split the video into parts.
+4. The user adds optional text at the top and/or bottom of the video, the same
+   for all parts or different per part.
+5. The app renders every part, names it <original-name>_part01, _part02, and
+   so on, and uploads all parts to a Google Drive folder (the folder ID is
+   provided later).
+6. Every step is logged. Logs are visible in the UI and saved as files.
+
+--------------------------------------------------------------------------------
+2. RECOMMENDED STACK
+--------------------------------------------------------------------------------
+- Frontend    : Next.js with tailwind css + daisyui + shadcn UI
+- API         : in next.js with app router
+- Video engine: FFmpeg + FFprobe installed on the server (industry standard)
+- Job queue   : BullMQ + Redis (rendering is slow and must not block the API)
+- Database    : MongoDB (jobs, parts, settings, log index)
+- Storage     : Local disk, temporary working dir; files deleted after Drive
+                upload
+- Drive       : Google Drive API v3, resumable uploads (large files)
+- Packaging   : Docker Compose (api, worker, redis, mongo). FFmpeg is
+                guaranteed to exist in the image.
+
+KEY RULE: The API server never runs FFmpeg directly. It creates a job. A
+separate worker process picks the job up and renders it.
+
+--------------------------------------------------------------------------------
+3. SCREENS (FRONTEND)
+--------------------------------------------------------------------------------
+
+SCREEN 1: NEW JOB (single page, step-based)
+
+Step A - Upload
+- Drag-and-drop zone plus a file picker.
+- Accepted formats: mp4, mov, mkv, webm, avi, m4v.
+- Shows upload progress bar, speed, ETA, with Cancel and Retry buttons.
+- After upload, shows video metadata (duration, resolution, fps, size, codec,
+  rotation, whether it has audio) and a playable preview.
+
+Step B - Output format
+- Aspect ratio presets: 9:16, 1:1, 4:5, 16:9, 4:3, and Custom (width:height).
+- Resolution presets: 1080p-class (e.g. 1080x1920 for 9:16), 720p-class, and
+  Original-based.
+- REFRAME MODE (only meaningful when source ratio differs from target ratio):
+  1. Blur background (fit): the full video is shown inside the frame, empty
+     space is filled with a blurred, enlarged copy of the same video. This is
+     the DEFAULT.
+  2. Solid bars (fit): the full video is shown with a chosen background color
+     (black by default).
+  3. Crop to fill: the video is zoomed to fill the frame and the overflow is
+     cut. The user chooses horizontal position: left, center, right, or a
+     draggable focal point.
+- If the source ratio already matches the target, reframe options are disabled
+  and a note says "No reframing needed."
+- A LIVE PREVIEW BOX shows the result using a still frame from the video,
+  updated whenever settings change.
+
+Step C - Split settings
+- Split mode (user picks one):
+  1. Fixed length: e.g. every 60 seconds.
+  2. Number of parts: e.g. 5 equal parts.
+  3. Custom timestamps: a table of start/end rows the user can add, remove,
+     and edit.
+- Optional extras:
+  - Overlap between parts (0 to N seconds).
+  - Minimum last-part length: if the final part is shorter than this value,
+    either merge it into the previous part or keep it as is (user choice).
+  - Maximum allowed part count (safety limit).
+- A PARTS TABLE PREVIEW appears immediately: Part #, Start, End, Duration,
+  Output filename. It updates live.
+
+Step D - Text overlays
+- Two independent text slots: TOP TEXT and BOTTOM TEXT. Each has an enable
+  toggle.
+- Mode for each slot:
+  - Same text for all parts: one text box.
+  - Different text per part: a table with one row per part (auto-generated
+    from Step C) with an editable text cell. Includes a "paste multiple
+    lines" option (one line becomes one part) and a "fill all with the same
+    text" shortcut.
+- Text tokens: {part}, {total}, {title} are replaced automatically. Example:
+  "Part {part}/{total}" becomes "Part 2/5".
+- Style options per slot: font family (from a fixed supported list), size,
+  color, outline color and width, background box (on/off, color, opacity),
+  alignment, margin from the edge, maximum lines.
+- Optional timing: show for the whole part, or only the first N seconds.
+- A SAFE-ZONE GUIDE toggle overlays the areas where YouTube/Instagram/TikTok
+  UI usually covers the video.
+- The preview shows the text on the sample frame.
+
+Step E - Output and destination
+- Filename template (default {title}_part{nn}), output format (mp4 / H.264 /
+  AAC), quality preset (Fast, Balanced, High).
+- Destination:
+  - Google Drive folder (shows connection status).
+  - If Drive is not yet configured: "Keep files locally; download as ZIP."
+- Option: create a subfolder in Drive named after the source video.
+
+Step F - Review and Start
+- Summary of every setting, estimated output count, estimated total duration,
+  estimated disk usage.
+- "Start Processing" button.
+
+SCREEN 2: JOB PROGRESS
+- Overall progress bar plus per-part status list.
+- Part states: Queued -> Rendering (with %) -> Rendered -> Uploading (with %)
+  -> Uploaded (with Drive link) -> or Failed (with reason and Retry button).
+- Buttons: Cancel Job, Retry Failed Parts, Download Logs.
+- Live log panel streaming this job's log lines, with filter by level.
+
+SCREEN 3: JOB HISTORY
+- Table of all past jobs: name, date, status, number of parts, number failed,
+  duration.
+- Open any job to see its settings, parts, Drive links, and logs.
+- Actions: DUPLICATE JOB SETTINGS (reuse same config for a new video) and
+  Delete.
+
+SCREEN 4: SETTINGS
+- Google Drive: connect account, set default folder ID or URL, "Test
+  connection" button.
+- Defaults: reframe mode, preset, fonts, filename template.
+- Limits: max file size, max parts, concurrency.
+- Log viewer (all system logs, filterable by file and level).
+
+--------------------------------------------------------------------------------
+4. BACKEND PROCESSING PIPELINE (THE HEART OF THE APP)
+--------------------------------------------------------------------------------
+For each job the worker runs these stages in order. Each stage writes log
+lines and updates the job status.
+
+1. VALIDATE: file exists, size within limit, real file type checked by content
+   (not just extension).
+2. PROBE (FFprobe): read duration, width, height, rotation metadata, sample
+   aspect ratio, frame rate (flag variable frame rate), video/audio codecs,
+   audio channels, color/HDR info, bitrate.
+3. NORMALIZE FACTS:
+   - Apply rotation: a phone video stored as 1920x1080 with 90-degree rotation
+     is treated as 1080x1920.
+   - Apply sample aspect ratio so the real display size is correct.
+4. COMPUTE THE PART PLAN: a list of {index, start, end, duration, filename}
+   from the split settings. Validate it (see edge cases, section 9).
+5. BUILD THE RENDER RECIPE PER PART:
+   - Trim from start to end.
+   - Reframe to target size (blur background, bars, or crop).
+   - Draw the top/bottom text.
+   - Keep audio, trimmed to match.
+   - Encode as H.264 + AAC, MP4, with the "fast start" flag so it plays
+     quickly online.
+6. RENDER PARTS one by one (or N in parallel per the concurrency setting).
+   Parse FFmpeg's progress output to update each part's percentage.
+7. VERIFY EACH OUTPUT: probe the result and confirm duration is within
+   tolerance of the plan, resolution is correct, file is not zero bytes.
+8. UPLOAD EACH VERIFIED PART to Drive (section 6). Record the Drive file ID
+   and link.
+9. VERIFY THE UPLOAD: compare size and checksum with the local file.
+10. CLEANUP: delete local part files and the source upload after all uploads
+    succeed (or according to the retention setting). Keep logs.
+11. FINALIZE: set job status to Completed, Completed with errors, Failed, or
+    Cancelled.
+
+RENDERING RULES
+- Always re-encode, since reframing and text force it anyway. NEVER use
+  "stream copy" cutting; it causes frame-inaccurate cuts and black frames at
+  part starts.
+- Run FFmpeg as an argument-array child process with NO SHELL, to prevent
+  command injection.
+- Text must never be built from raw user input into a filter string. Write the
+  text to a temporary file or a subtitle file, or render it as an image
+  overlay. This avoids breakage from quotes, colons, percent signs, and
+  backslashes.
+- Use the Noto family of fonts so Hindi (Devanagari), Urdu, Arabic, emoji, and
+  other scripts render correctly. Complex scripts need a text-shaping-capable
+  renderer, so verify with a Hindi test string.
+
+--------------------------------------------------------------------------------
+5. DATA MODELS (MONGODB)
+--------------------------------------------------------------------------------
+JOB
+- id, status, createdAt, startedAt, finishedAt
+- source: original name, sanitized name, stored path, size, probe result
+  (full JSON)
+- settings: aspect ratio, resolution, reframe mode, background color, focal
+  point, split config, text config, filename template, quality preset, Drive
+  options
+- plan: array of part plans
+- counts: total, rendered, uploaded, failed
+- error: last fatal error message and code
+- cancelRequested flag
+
+PART
+- jobId, index, start, end, duration, filename, topText, bottomText
+- status, renderProgress, uploadProgress
+- localPath, outputSize, outputProbe
+- driveFileId, driveLink, driveChecksum
+- attempts (render and upload separately), lastError
+
+SETTING (singleton or per user)
+- Drive credentials (stored encrypted), default folder ID, defaults, limits
+
+LOGINDEX (optional)
+- Pointers to log files by job, for fast lookup in the UI
+
+--------------------------------------------------------------------------------
+6. GOOGLE DRIVE INTEGRATION
+--------------------------------------------------------------------------------
+- The folder ID is a CONFIGURATION VALUE, not hard-coded. The app must run
+  fully without it and simply show "Drive not configured."
+- Authentication options:
+  - OAuth (recommended for personal use): upload into the user's own Drive and
+    quota. Store the refresh token encrypted.
+  - Service account: the target folder must be shared with the service
+    account's email; the account has its own quota limits.
+- Use RESUMABLE UPLOADS so large files survive network drops.
+- Retry with exponential backoff on 5xx errors and rate-limit errors, up to N
+  attempts, then mark the part as upload-failed (the local file is kept so the
+  user can retry).
+- Check that the folder exists and is writable ("Test connection" button)
+  before a job starts.
+- Support shared drives.
+- If a file with the same name exists in the folder, follow the user's chosen
+  policy: skip, overwrite (new version), or auto-rename (_part01 (2)).
+- After upload, store the file ID and web link, and verify size and checksum.
+- Never log tokens or secrets.
+
+--------------------------------------------------------------------------------
+7. API ENDPOINTS (CONCEPTUAL)
+--------------------------------------------------------------------------------
+- Upload: initiate chunked upload, upload a chunk, complete upload, abort
+  upload. Chunked and resumable so large files and flaky connections work.
+- POST /jobs                      : create a job from settings
+- GET  /jobs, GET /jobs/:id       : list and detail
+- POST /jobs/:id/start, /cancel, /retry-failed
+- POST /jobs/:id/parts/:index/retry
+- DELETE /jobs/:id                : delete the job and its files
+- POST /preview/frame             : returns a rendered still of the settings on
+                                    a sample frame (server-side, so it matches
+                                    the real output)
+- POST /plan/preview              : takes split settings plus source duration,
+                                    returns the parts table
+- GET /jobs/:id/logs
+- GET /jobs/:id/logs/stream       : live streaming via Server-Sent Events or
+                                    WebSocket
+- GET /jobs/:id/download-zip      : local-fallback download
+- GET/PUT /settings, POST /drive/test, GET /drive/auth-url, and the OAuth
+  callback
+- GET /health                     : checks FFmpeg, Redis, Mongo, disk space,
+                                    and Drive
+- GET /logs/files, GET /logs/files/:name : system log viewer
+
+--------------------------------------------------------------------------------
+8. LOGGING: COMPLETE LIST OF LOG FILES
+--------------------------------------------------------------------------------
+FORMAT: JSON Lines (one JSON object per line).
+EVERY ENTRY CONTAINS: timestamp (ISO, UTC), level (debug/info/warn/error),
+service (api/worker), event name, message, jobId and partIndex where
+relevant, a request/correlation ID, and duration where relevant.
+
+ROTATION: daily, plus a size cap per file. Keep a defined number of days
+(configurable). Compress old files.
+
+REDACTION: never write tokens, secrets, or full user home paths.
+
+LOG FILES
+- app.log      : General API lifecycle: startup, shutdown, config loaded
+                 (non-secret), health checks.
+- access.log   : Every HTTP request: method, path, status, response time, IP,
+                 user agent.
+- error.log    : Every error and unhandled exception with stack trace, from
+                 all services.
+- upload.log   : Chunk received, chunk failed, upload complete or aborted,
+                 bytes, speed, file validation results.
+- probe.log    : Full FFprobe output per job, plus the normalized facts
+                 (rotation, SAR, VFR flag).
+- plan.log     : The computed part plan, every adjustment (merged last part,
+                 clamped values), and validation warnings.
+- queue.log    : Job enqueued, picked up, completed, failed, stalled, retried,
+                 cancelled, with queue depth.
+- render.log   : One section per part: exact FFmpeg arguments, progress
+                 milestones, exit code, elapsed time.
+- ffmpeg/<jobId>/part<NN>.log : RAW FFmpeg stderr for each part (separate file
+                 per part so debugging is easy).
+- verify.log   : Output verification results: expected vs actual duration,
+                 resolution, size, pass/fail.
+- drive.log    : Auth events, folder checks, upload start/progress/finish,
+                 retries, quota or rate-limit responses, checksum
+                 verification, Drive file IDs.
+- cleanup.log  : Every file deleted, bytes freed, retention-policy decisions,
+                 failed deletions.
+- jobs/<jobId>.log : PER-JOB AGGREGATE of all of the above, in order. This is
+                 what the UI's log panel and "Download Logs" use.
+- audit.log    : User actions: settings changed, Drive connected/disconnected,
+                 job created/cancelled/deleted, retries.
+- security.log : Rejected files (wrong content type, oversized), path-traversal
+                 attempts, rate-limit hits, auth failures.
+- system.log   : Disk space, memory/CPU snapshots at job start and end, FFmpeg
+                 version, Redis/Mongo connection changes.
+
+--------------------------------------------------------------------------------
+9. EDGE CASES THE APP MUST HANDLE
+--------------------------------------------------------------------------------
+
+UPLOAD AND FILE VALIDITY
+- Zero-byte, truncated, or corrupted video: reject with a clear message.
+- Wrong extension or non-video file renamed to .mp4: detect by content and
+  reject.
+- File larger than the limit: reject before upload starts (using the size the
+  browser reports), and again on the server.
+- Upload interrupted (network loss, browser closed): chunked upload resumes;
+  abandoned partial uploads are deleted after a timeout.
+- Duplicate upload of the same file: allowed, but each job gets its own
+  isolated working folder.
+- Filenames with spaces, Unicode, emoji, very long names, leading dots, or
+  path characters (../): sanitize for storage; keep the original name only for
+  display and for the output naming template. Strip or replace characters
+  illegal in Drive or on disk, and cap the length.
+- Insufficient disk space: check free space before starting (estimate roughly
+  2x the source size plus the output) and fail early with a clear message.
+
+VIDEO PROPERTIES
+- Phone video with rotation metadata: handle it, or output will be sideways.
+- Non-square pixels (SAR not 1): correct them, or the video looks stretched.
+- Variable frame rate: normalize to constant frame rate to avoid audio drift.
+- No audio track: render with no audio (do not fail on missing audio mapping).
+- Multiple audio tracks: use the default track, with an option to choose.
+- Extremely short video (shorter than one part): output a single part, with a
+  warning.
+- Extremely long video (hours): the part count limit applies, and the user
+  must confirm if the plan is very large.
+- Very high resolution (4K/8K) or HDR: downscale to target, and tone-map HDR
+  to avoid washed-out colors.
+- Very low resolution source upscaled to 1080x1920: allow it, but show an
+  "upscaling" warning.
+- Source already matches target ratio: skip reframing entirely.
+- Source is portrait and target is landscape (reverse case): the same three
+  reframe modes work, with blur on the left and right.
+- Odd dimensions: H.264 needs even width and height, so always round to even
+  numbers.
+- Corrupt frames mid-file: log the warning; fail the part only if output
+  verification fails.
+
+SPLITTING
+- Part length <= 0 or non-numeric: reject in the UI and on the server.
+- Part length longer than the video: a single part.
+- Last part tiny (e.g. 0.4 seconds): apply the minimum-last-part rule (merge
+  or keep).
+- Custom timestamps: overlapping, reversed (end < start), outside the video
+  duration, gaps, or duplicates must all be validated with clear per-row
+  errors.
+- Overlap setting larger than the part length: reject.
+- Number-of-parts mode with a number larger than the duration allows (e.g. 100
+  parts of a 10-second video): enforce a minimum part duration.
+- Floating-point timestamp rounding: use a consistent precision
+  (milliseconds), and make sure parts do not drift or skip frames at the
+  boundaries.
+- Part count above the safety limit: block it, or require explicit
+  confirmation.
+
+TEXT
+- Empty text: skip the overlay without error.
+- Very long text: auto-wrap to the max lines, then shrink the font or truncate
+  with "..." according to the user's setting. Show a warning in the preview.
+- Text containing quotes, colons, percent signs, backslashes, newlines, emoji,
+  or Hindi/Arabic: must render correctly (no raw string injection into filter
+  commands).
+- Per-part text rows fewer than the part count: missing rows fall back to the
+  "same for all" text or blank, per the user's choice, with a warning.
+- Per-part text rows more than the part count: ignore the extras, with a
+  warning.
+- Part count changes after the user typed per-part texts: keep the existing
+  rows and add or remove rows at the end. NEVER silently wipe the user's
+  input.
+- Text outside the safe zone or overlapping the main subject: show the guide,
+  but allow the user to do it anyway.
+- Missing font: fall back to the default font and log a warning.
+
+RENDERING AND SYSTEM
+- FFmpeg crashes or returns a non-zero exit code: mark that part Failed, store
+  the last stderr lines, and continue with the other parts (the job ends as
+  "Completed with errors").
+- Output verification fails (duration off by more than tolerance, or file
+  empty): treat as failed and retry.
+- Retry policy: a limited number of render retries per part, with a clear
+  final failure.
+- User cancels mid-render: kill the FFmpeg process safely, stop the queue,
+  mark remaining parts Cancelled, and clean up partial files.
+- Server or worker restarts mid-job: on startup, find jobs stuck in
+  Rendering/Uploading, then either resume them (skip already-rendered or
+  uploaded parts) or mark them Failed with a Retry option. Rendering must be
+  IDEMPOTENT: rerunning a part overwrites its own partial file.
+- Two jobs at once: per-worker concurrency limits, and isolated working
+  folders per job.
+- FFmpeg not installed or wrong version: the health check fails and the UI
+  shows a blocking error.
+- Zombie processes: a timeout per part (scaled by duration), and kill if
+  exceeded.
+
+DRIVE
+- Folder ID not set yet: the job can run in "local only" mode, and parts wait
+  for upload once Drive is configured ("Upload pending parts" button).
+- Invalid or unauthorized folder, deleted folder, or insufficient permission:
+  detect in "Test connection" and again before upload.
+- Expired access token: refresh automatically. If the refresh token is
+  revoked, pause uploads and prompt the user to reconnect, without losing
+  local files.
+- Drive storage full or quota exceeded: pause, notify, and keep the local
+  files.
+- Rate limiting or network failure mid-upload: resumable upload plus backoff
+  retries.
+- Duplicate filenames in the folder: apply the chosen policy.
+- Partial success (some parts uploaded, some not): the job status reflects
+  it, and "Retry failed parts" uploads only the missing ones.
+- Never delete the local file until the Drive upload is verified.
+
+SECURITY AND OPERATIONS
+- Validate every setting on the server, never trusting the frontend.
+- Rate-limit the upload and job-creation endpoints.
+- Add authentication (even simple password or token auth), because the app can
+  write to your Drive and consume server CPU.
+- Auto-delete old working files on a schedule (the cleanup job), with the
+  retention period configurable.
+- Time zones: store UTC, display in the user's local time (IST).
+
+--------------------------------------------------------------------------------
+10. SUGGESTED PROJECT STRUCTURE
+--------------------------------------------------------------------------------
+/client
+  - pages: NewJob, JobProgress, History, Settings
+  - components: UploadZone, RatioPicker, ReframeModePicker, SplitConfigurator,
+    PartsTable, TextOverlayEditor, PreviewCanvas, LogViewer
+  - API layer
+/server
+  - routes, controllers
+  - services: probe, planner, renderer, textRenderer, drive, uploader,
+    cleanup, logger
+  - models
+  - middleware: auth, validation, rate-limit, error handler
+/worker
+  - queue consumer, pipeline orchestrator, process runner with progress
+    parsing
+/shared
+  - validation schemas for settings, shared between client and server so both
+    enforce the same rules
+/storage
+  - uploads/, work/<jobId>/, outputs/<jobId>/  (all temporary)
+/logs
+  - all the log files from section 8
+docker-compose.yml, .env.example
+
+ENVIRONMENT VARIABLES (names only)
+- max upload size
+- working directory path
+- log directory and retention days
+- worker concurrency
+- Redis and Mongo URLs
+- Google client ID / secret / redirect URL
+- default Drive folder ID (optional)
+- encryption key for stored tokens
+- part-count limit
+
+--------------------------------------------------------------------------------
+11. BUILD ORDER FOR THE CODING AGENT
+--------------------------------------------------------------------------------
+1. FOUNDATION: project skeleton, Docker with FFmpeg, logger service (all log
+   files from section 8), config, and the health endpoint.
+2. UPLOAD: chunked and resumable upload, validation, and the probe service
+   with rotation/SAR/VFR normalization.
+3. PLANNER: the split planner with every validation from section 9, plus the
+   parts preview endpoint and the UI table.
+4. RENDERER (no text yet): trimming plus the three reframe modes, progress
+   parsing, and output verification. Test with landscape, portrait, rotated,
+   and square sources.
+5. TEXT OVERLAYS: the safe text-rendering approach, per-part text, tokens,
+   multi-language fonts, and the live preview frame.
+6. QUEUE AND JOB LIFECYCLE: BullMQ, states, cancel, retry, and restart
+   recovery.
+7. PROGRESS AND LOGS UI: live progress, the log panel, and per-job log
+   download.
+8. DRIVE INTEGRATION: OAuth, the folder setting, resumable upload,
+   verification, naming conflicts, and retry.
+9. HISTORY, SETTINGS, CLEANUP JOB, AND THE ZIP FALLBACK.
+10. HARDENING: rate limits, auth, and run through the full test checklist.
+
+--------------------------------------------------------------------------------
+12. ACCEPTANCE TEST CHECKLIST
+--------------------------------------------------------------------------------
+[ ] A 16:9 landscape 5-minute video splits into 60-second parts as 9:16 with
+    a blurred background, with correct names (name_part01 through
+    name_part05).
+[ ] A rotated phone video comes out upright.
+[ ] A video with no audio renders without errors.
+[ ] A 61-second video with 60-second parts and a minimum-last-part rule gives
+    the correct merge or keep result.
+[ ] Per-part text with Hindi and English and special characters (' : % ")
+    renders correctly.
+[ ] Cancelling mid-render leaves no orphan processes or files.
+[ ] Killing the worker mid-job and restarting recovers the job.
+[ ] Invalid Drive folder, expired token, and Drive quota full each show a
+    clear message without data loss.
+[ ] Every log file in section 8 is created and contains entries after a full
+    run.
+[ ] A failed part can be retried alone without re-rendering the others.
+
+================================================================================
+END OF SPECIFICATION
+================================================================================

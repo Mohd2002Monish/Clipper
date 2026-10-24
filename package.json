@@ -1,0 +1,48 @@
+{
+  "name": "videotimmer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Video Splitter & Reframer Web Application with BullMQ, FFmpeg, and Google Drive Integration",
+  "scripts": {
+    "dev": "node scripts/dev-all.mjs",
+    "dev:web": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "worker": "tsx watch src/worker/index.ts",
+    "worker:prod": "node dist/worker/index.js",
+    "desktop": "./scripts/launch-desktop.sh",
+    "desktop:stop": "./scripts/stop-desktop.sh",
+    "setup": "./setup-mac.sh",
+    "lint": "next lint",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:active": "NO_WEBSERVER=1 playwright test --ui"
+  },
+  "dependencies": {
+    "archiver": "^7.0.1",
+    "bullmq": "^5.8.5",
+    "clsx": "^2.1.1",
+    "dotenv": "^16.4.5",
+    "googleapis": "^140.0.0",
+    "ioredis": "^5.4.1",
+    "lucide-react": "^0.400.0",
+    "mongoose": "^8.5.1",
+    "next": "^14.2.5",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tailwind-merge": "^2.3.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.1",
+    "@types/archiver": "^6.0.2",
+    "@types/node": "^20.14.9",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "autoprefixer": "^10.4.19",
+    "postcss": "^8.4.39",
+    "tailwindcss": "^3.4.4",
+    "tsx": "^4.16.2",
+    "typescript": "^5.5.3"
+  }
+}
