@@ -93,6 +93,13 @@ npm run desktop:stop
 Access the dashboard at `http://localhost:3000`.
 Health check endpoint: `http://localhost:3000/api/health`.
 
+---
+
+## Future Roadmap
+
+See [ROADMAP.md](file:///Users/mohd2002monish/Documents/ScloudIN/VideoTimmer/ROADMAP.md) for planned features including local Whisper speech-to-text, interactive SRT timeline editing, animated captions, and audio ducking.
+
+
 
 
 {
