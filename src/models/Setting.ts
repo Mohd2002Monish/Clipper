@@ -26,6 +26,11 @@ const SettingSchema = new Schema<ISettingDocument>(
       appSecret: { type: String, default: '' },
       redirectUri: { type: String, default: 'http://localhost:3000/auth/instagram/callback' },
     },
+    facebook: {
+      appId: { type: String, default: '' },
+      appSecret: { type: String, default: '' },
+      redirectUri: { type: String, default: 'http://localhost:3000/auth/facebook/callback' },
+    },
     defaults: {
       reframeMode: { type: String, default: 'blur' },
       qualityPreset: { type: String, default: 'balanced' },

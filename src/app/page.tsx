@@ -63,7 +63,9 @@ import { YouTubePublisherView } from '@/components/YouTubePublisherView';
 import { YouTubeUploadedVideosView } from '@/components/YouTubeUploadedVideosView';
 import { ThreadsPublisherView } from '@/components/ThreadsPublisherView';
 import { InstagramPublisherView } from '@/components/InstagramPublisherView';
+import { FacebookPublisherView } from '@/components/FacebookPublisherView';
 import { WaterfallSyndicationView } from '@/components/WaterfallSyndicationView';
+import { MetaConnectionGuideView } from '@/components/MetaConnectionGuideView';
 import { VideoProbeData, IJob } from '@/shared/types';
 import { PartPlan, TextOverlaySettings } from '@/shared/schemas';
 import { CustomSelect } from '@/components/ui/CustomSelect';
@@ -280,6 +282,7 @@ export default function HomePage() {
           'new-job',
           'queue',
           'history',
+          'waterfall',
           'youtube',
           'uploaded-videos',
           'threads-composer',
@@ -289,6 +292,10 @@ export default function HomePage() {
           'instagram-composer',
           'instagram-posts',
           'instagram-analytics',
+          'facebook-composer',
+          'facebook-posts',
+          'facebook-analytics',
+          'meta-guide',
           'settings',
         ].includes(tabParam)
       ) {
@@ -1926,6 +1933,18 @@ export default function HomePage() {
 
       {/* Screen 12: Instagram Reels Analytics & Insights */}
       {activeTab === 'instagram-analytics' && <InstagramPublisherView initialSubTab="analytics" />}
+
+      {/* Screen 13: Facebook Reels & Video Composer */}
+      {activeTab === 'facebook-composer' && <FacebookPublisherView initialSubTab="composer" />}
+
+      {/* Screen 14: Facebook Scheduled & Queue */}
+      {activeTab === 'facebook-posts' && <FacebookPublisherView initialSubTab="posts" />}
+
+      {/* Screen 15: Facebook Page Analytics */}
+      {activeTab === 'facebook-analytics' && <FacebookPublisherView initialSubTab="analytics" />}
+
+      {/* Screen 16: Meta Account Connection Guide */}
+      {activeTab === 'meta-guide' && <MetaConnectionGuideView />}
       </div>
 
       <NoticeModal

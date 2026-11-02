@@ -21,9 +21,12 @@ import {
   MessageSquare,
   AtSign,
   Instagram,
+  Facebook,
   Terminal,
   Workflow,
   GitBranch,
+  BookOpen,
+  Compass,
 } from 'lucide-react';
 
 export type TabType =
@@ -40,6 +43,10 @@ export type TabType =
   | 'instagram-composer'
   | 'instagram-posts'
   | 'instagram-analytics'
+  | 'facebook-composer'
+  | 'facebook-posts'
+  | 'facebook-analytics'
+  | 'meta-guide'
   | 'settings';
 
 interface SidebarProps {
@@ -67,7 +74,7 @@ interface SubMenuItem {
 }
 
 interface MenuGroup {
-  id: 'videos' | 'syndication' | 'youtube' | 'threads' | 'instagram';
+  id: 'videos' | 'syndication' | 'youtube' | 'threads' | 'instagram' | 'facebook';
   label: string;
   description: string;
   icon: React.ComponentType<{ className?: string }>;
@@ -233,6 +240,14 @@ export function Sidebar({
           accent: 'text-emerald-400',
           activeBg: 'bg-purple-600 text-white shadow-md shadow-purple-600/30 font-semibold',
         },
+        {
+          id: 'meta-guide',
+          label: 'Meta Setup Guide',
+          description: 'Step-by-step account guide',
+          icon: BookOpen,
+          accent: 'text-purple-400',
+          activeBg: 'bg-purple-600 text-white shadow-md shadow-purple-600/30 font-semibold',
+        },
       ],
     },
     {
@@ -268,6 +283,58 @@ export function Sidebar({
           icon: BarChart3,
           accent: 'text-indigo-400',
           activeBg: 'bg-gradient-to-r from-pink-600 to-rose-600 text-white shadow-md shadow-pink-600/30 font-semibold',
+        },
+        {
+          id: 'meta-guide',
+          label: 'Meta Setup Guide',
+          description: 'Step-by-step account guide',
+          icon: BookOpen,
+          accent: 'text-pink-400',
+          activeBg: 'bg-gradient-to-r from-pink-600 to-rose-600 text-white shadow-md shadow-pink-600/30 font-semibold',
+        },
+      ],
+    },
+    {
+      id: 'facebook',
+      label: 'Facebook',
+      description: 'Reels, videos & pages',
+      icon: Facebook,
+      accent: 'text-blue-400',
+      iconBg: 'bg-blue-600/10 text-blue-400 border border-blue-500/20',
+      badge: 'Pages',
+      badgeColor: 'bg-blue-600 text-white font-bold',
+      items: [
+        {
+          id: 'facebook-composer',
+          label: 'Reels & Video Composer',
+          description: 'Draft, video & schedule',
+          icon: FileText,
+          accent: 'text-blue-400',
+          activeBg: 'bg-blue-600 text-white shadow-md shadow-blue-600/30 font-semibold',
+        },
+        {
+          id: 'facebook-posts',
+          label: 'Scheduled & Queue',
+          description: 'Manage Facebook queue',
+          icon: Clock,
+          accent: 'text-amber-400',
+          activeBg: 'bg-blue-600 text-white shadow-md shadow-blue-600/30 font-semibold',
+        },
+        {
+          id: 'facebook-analytics',
+          label: 'Page Analytics',
+          description: 'Reach, views & reactions',
+          icon: BarChart3,
+          accent: 'text-indigo-400',
+          activeBg: 'bg-blue-600 text-white shadow-md shadow-blue-600/30 font-semibold',
+        },
+        {
+          id: 'meta-guide',
+          label: 'Meta Setup Guide',
+          description: 'Step-by-step account guide',
+          icon: BookOpen,
+          accent: 'text-blue-400',
+          activeBg: 'bg-blue-600 text-white shadow-md shadow-blue-600/30 font-semibold',
         },
       ],
     },
@@ -433,10 +500,44 @@ export function Sidebar({
         </div>
 
         {/* System & Settings Section */}
-        <div className="pt-2 border-t border-slate-800/60">
+        <div className="pt-2 border-t border-slate-800/60 space-y-1">
           <div className="px-3 pb-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-            System
+            System & Help
           </div>
+          <button
+            type="button"
+            onClick={() => onTabChange('meta-guide')}
+            className={`w-full text-left flex items-center justify-between px-3 py-2.5 rounded-xl transition-all duration-150 group ${
+              activeTab === 'meta-guide'
+                ? 'bg-purple-600 text-white shadow-md shadow-purple-600/30 font-semibold'
+                : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+            }`}
+          >
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div
+                className={`p-1.5 rounded-lg transition-colors ${
+                  activeTab === 'meta-guide'
+                    ? 'bg-white/20 text-white'
+                    : 'bg-slate-800/80 group-hover:bg-slate-800 text-purple-400'
+                }`}
+              >
+                <Compass className="w-4 h-4" />
+              </div>
+              <div className="truncate">
+                <div className="text-xs font-medium leading-none">Meta Setup Guide</div>
+                <div
+                  className={`text-[10px] mt-1 leading-none truncate ${
+                    activeTab === 'meta-guide' ? 'text-purple-100' : 'text-slate-400'
+                  }`}
+                >
+                  Instagram & Threads docs
+                </div>
+              </div>
+            </div>
+            <span className="text-[9px] px-1.5 py-0.5 rounded-full uppercase tracking-wider font-semibold bg-purple-500/20 text-purple-300 border border-purple-500/30">
+              Guide
+            </span>
+          </button>
           <button
             type="button"
             onClick={() => onTabChange('settings')}

@@ -43,6 +43,8 @@ import {
   Terminal,
   Play,
   Cpu,
+  UploadCloud,
+  FileVideo,
 } from 'lucide-react';
 import { NoticeModal } from './ui/NoticeModal';
 
@@ -248,6 +250,8 @@ export function ThreadsPublisherView({ initialSubTab = 'composer' }: ThreadsPubl
   const [isVideoPickerOpen, setIsVideoPickerOpen] = useState<boolean>(false);
   const [targetPostIndexForVideo, setTargetPostIndexForVideo] = useState<number>(0);
   const [availableVideos, setAvailableVideos] = useState<VideoOption[]>([]);
+  const [isUploadingLocalVideo, setIsUploadingLocalVideo] = useState<boolean>(false);
+  const threadsFileInputRef = useRef<HTMLInputElement>(null);
   const [isLoadingVideos, setIsLoadingVideos] = useState<boolean>(false);
 
   // --- POSTS QUEUE STATE ---
@@ -351,22 +355,37 @@ export function ThreadsPublisherView({ initialSubTab = 'composer' }: ThreadsPubl
     }
   }, [statusFilter, accountFilter, searchQuery]);
 
-  // 4. Fetch Analytics
-  const fetchAnalytics = useCallback(async () => {
-    setIsLoadingAnalytics(true);
-    try {
-      const url = `/api/threads/analytics${analyticsAccountFilter !== 'all' ? `?account=${encodeURIComponent(analyticsAccountFilter)}` : ''}`;
-      const res = await fetch(url);
-      const data = await res.json();
-      if (data.success) {
-        setAnalyticsData(data);
+  // 4. Fetch Analytics (with live Meta Threads Insights API sync)
+  const fetchAnalytics = useCallback(
+    async (syncLive = false) => {
+      setIsLoadingAnalytics(true);
+      try {
+        const params = new URLSearchParams();
+        if (analyticsAccountFilter !== 'all') params.append('account', analyticsAccountFilter);
+        if (syncLive) params.append('sync', 'true');
+
+        const url = `/api/threads/analytics?${params.toString()}`;
+        const res = await fetch(url);
+        const data = await res.json();
+        if (data.success) {
+          setAnalyticsData(data);
+          if (syncLive) {
+            setNotice({
+              isOpen: true,
+              title: 'Live Threads Analytics Synced',
+              message: `Fetched real-time metrics and follower data from Meta Threads Insights API for @${data.account?.username || 'account'}.`,
+              type: 'success',
+            });
+          }
+        }
+      } catch {
+        // Ignore
+      } finally {
+        setIsLoadingAnalytics(false);
       }
-    } catch {
-      // Ignore
-    } finally {
-      setIsLoadingAnalytics(false);
-    }
-  }, [analyticsAccountFilter]);
+    },
+    [analyticsAccountFilter]
+  );
 
   // 5. Fetch Available Videos from Split Jobs
   const fetchAvailableVideos = async () => {
@@ -476,6 +495,56 @@ export function ThreadsPublisherView({ initialSubTab = 'composer' }: ThreadsPubl
       return copy;
     });
     setIsVideoPickerOpen(false);
+  };
+
+  // Handle local video file upload from PC
+  const handleThreadsLocalFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    e.target.value = '';
+    setIsUploadingLocalVideo(true);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const res = await fetch('/api/upload/direct', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to upload video from local PC.');
+      }
+
+      const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
+      const absoluteUrl = `${origin}${data.downloadUrl}`;
+
+      setThreadPosts((prev) => {
+        const copy = [...prev];
+        copy[targetPostIndexForVideo] = {
+          ...copy[targetPostIndexForVideo],
+          mediaUrl: absoluteUrl,
+          mediaType: 'VIDEO',
+          videoTitle: data.originalFilename || file.name,
+        };
+        return copy;
+      });
+
+      setIsVideoPickerOpen(false);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setNotice({
+        isOpen: true,
+        title: 'Video Selection Failed',
+        message: msg,
+        type: 'error',
+      });
+    } finally {
+      setIsUploadingLocalVideo(false);
+    }
   };
 
   // Remove Video from Post
@@ -1968,14 +2037,45 @@ export function ThreadsPublisherView({ initialSubTab = 'composer' }: ThreadsPubl
       {/* ============================================================== */}
       {subTab === 'analytics' && (
         <div className="space-y-6">
-          {/* Account Filter Bar */}
-          <div className="flex items-center justify-between bg-white p-3.5 rounded-2xl border border-slate-200 shadow-sm">
+          {/* Account Filter & Live Meta Sync Bar */}
+          <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-purple-600 text-white flex items-center justify-center shadow-sm">
+                <AtSign className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-bold text-slate-900">
+                    {analyticsData?.account
+                      ? `@${analyticsData.account.username}`
+                      : 'Threads Account Performance'}
+                  </h3>
+                  <span
+                    className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${
+                      analyticsData?.account?.isLive
+                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                        : 'bg-slate-100 text-slate-600'
+                    }`}
+                  >
+                    {analyticsData?.account?.isLive ? 'Live Meta Threads API' : 'Sandbox / Mock'}
+                  </span>
+                </div>
+                {analyticsData?.account && (
+                  <div className="text-xs text-slate-500 mt-0.5">
+                    <strong className="text-slate-800 font-semibold">
+                      {(analyticsData.account.followerCount || 0).toLocaleString()}
+                    </strong>{' '}
+                    followers &bull; Live account insights
+                  </div>
+                )}
+              </div>
+            </div>
+
             <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-slate-700">Account Filter:</span>
               <select
                 value={analyticsAccountFilter}
                 onChange={(e) => setAnalyticsAccountFilter(e.target.value)}
-                className="text-xs font-semibold text-purple-700 bg-purple-50 border border-purple-200 rounded-xl px-3 py-1.5 outline-none"
+                className="text-xs font-semibold text-purple-700 bg-purple-50 border border-purple-200 rounded-xl px-3 py-1.5 outline-hidden transition-colors"
               >
                 <option value="all">All Accounts (Consolidated)</option>
                 {accounts.map((acc) => (
@@ -1984,15 +2084,18 @@ export function ThreadsPublisherView({ initialSubTab = 'composer' }: ThreadsPubl
                   </option>
                 ))}
               </select>
+
+              <button
+                type="button"
+                onClick={() => fetchAnalytics(true)}
+                disabled={isLoadingAnalytics}
+                className="text-xs font-semibold text-white bg-purple-600 hover:bg-purple-700 disabled:opacity-50 flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl shadow-xs transition-all"
+                title="Fetch real live metrics from Meta Threads Insights API"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isLoadingAnalytics ? 'animate-spin' : ''}`} />
+                <span>{isLoadingAnalytics ? 'Syncing...' : 'Sync Live Analytics'}</span>
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={fetchAnalytics}
-              className="text-xs font-semibold text-slate-600 hover:text-purple-600 flex items-center gap-1.5 px-3 py-1.5 rounded-xl hover:bg-slate-100"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${isLoadingAnalytics ? 'animate-spin' : ''}`} />
-              Sync Metrics
-            </button>
           </div>
 
           {/* Hero KPI Cards */}
@@ -2607,7 +2710,7 @@ export function ThreadsPublisherView({ initialSubTab = 'composer' }: ThreadsPubl
 
                   <div className="mt-3 pt-3 border-t border-slate-200/60 flex items-center justify-between text-[11px] text-slate-500">
                     <div>
-                      Redirect URI: <code className="bg-white/80 px-1.5 py-0.5 rounded border border-slate-200 text-slate-700 font-mono">http://localhost:3000/auth/threads/callback</code>
+                      Redirect URI: <code className="bg-white/80 px-1.5 py-0.5 rounded border border-slate-200 text-slate-700 font-mono">{oauthStatus.redirectUri || 'https://localhost:3000/auth/threads/callback'}</code>
                     </div>
                     <button
                       type="button"
@@ -2735,6 +2838,18 @@ export function ThreadsPublisherView({ initialSubTab = 'composer' }: ThreadsPubl
                           )}
                         </button>
                       </div>
+
+                      {/* Visual Setup Guide Link */}
+                      <a
+                        href="/?tab=meta-guide"
+                        className="flex items-center justify-between p-2.5 rounded-xl bg-white hover:bg-purple-100/60 border border-purple-200 text-purple-900 transition-all text-xs font-semibold"
+                      >
+                        <div className="flex items-center gap-2">
+                          <Compass className="w-3.5 h-3.5 text-purple-600" />
+                          <span>View Step-by-Step Meta Setup Guide with Screenshots</span>
+                        </div>
+                        <ExternalLink className="w-3 h-3 text-purple-600" />
+                      </a>
                     </div>
                   </div>
                 )}
@@ -2947,7 +3062,7 @@ export function ThreadsPublisherView({ initialSubTab = 'composer' }: ThreadsPubl
             <div className="flex items-center justify-between pb-2 border-b border-slate-100">
               <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
                 <Video className="w-4 h-4 text-purple-600" />
-                Select Video from Rendered Parts
+                Select Video to Attach
               </h3>
               <button
                 type="button"
@@ -2956,6 +3071,50 @@ export function ThreadsPublisherView({ initialSubTab = 'composer' }: ThreadsPubl
               >
                 <X className="w-4 h-4" />
               </button>
+            </div>
+
+            {/* Hidden Native File Input */}
+            <input
+              ref={threadsFileInputRef}
+              type="file"
+              accept="video/mp4,video/quicktime,video/x-matroska,video/*"
+              onChange={handleThreadsLocalFileSelected}
+              className="hidden"
+            />
+
+            {/* Direct Choose from PC Option */}
+            <div className="p-3 bg-purple-50/70 border border-purple-200/80 rounded-xl flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5 truncate">
+                <div className="p-2 bg-purple-600 text-white rounded-lg shrink-0">
+                  <UploadCloud className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="text-xs font-bold text-slate-800">Local PC Video</div>
+                  <div className="text-[10px] text-slate-500">Choose MP4 or MOV directly from your computer</div>
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={isUploadingLocalVideo}
+                onClick={() => threadsFileInputRef.current?.click()}
+                className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-xs font-bold shrink-0 transition-all flex items-center gap-1.5 disabled:opacity-50"
+              >
+                {isUploadingLocalVideo ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Loading...</span>
+                  </>
+                ) : (
+                  <>
+                    <UploadCloud className="w-3.5 h-3.5" />
+                    <span>Choose File</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            <div className="text-[10px] uppercase font-bold tracking-wider text-slate-400 pt-1">
+              Or Choose from Rendered Splits
             </div>
 
             <div className="max-h-72 overflow-y-auto space-y-2">

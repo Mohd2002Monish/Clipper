@@ -13,6 +13,7 @@ export interface IInstagramAccount {
   tokenExpiry?: Date;
   facebookPageId?: string;
   facebookPageName?: string;
+  authProvider?: 'instagram_login' | 'facebook_login';
   isActive: boolean;
   isSimulated: boolean;
   createdAt?: string;
@@ -69,6 +70,11 @@ const InstagramAccountSchema = new Schema<IInstagramAccountDocument>(
     facebookPageName: {
       type: String,
       default: '',
+    },
+    authProvider: {
+      type: String,
+      enum: ['instagram_login', 'facebook_login'],
+      default: 'instagram_login',
     },
     isActive: {
       type: Boolean,

@@ -42,3 +42,20 @@ export function decryptText(cipherText: string): string {
   const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]);
   return decrypted.toString('utf8');
 }
+
+/**
+ * Safely decrypts an encrypted access token.
+ * If the string does not match the encrypted iv:authTag:ciphertext format,
+ * it returns the plaintext token (for backward compatibility with legacy unencrypted records).
+ */
+export function safeDecryptToken(token: string): string {
+  if (!token) return '';
+  if (token.includes(':') && token.split(':').length === 3) {
+    try {
+      return decryptText(token);
+    } catch {
+      return token;
+    }
+  }
+  return token;
+}

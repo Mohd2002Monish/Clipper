@@ -4,6 +4,7 @@ import { ThreadsPost, IThreadsPostDocument } from '../../models/ThreadsPost';
 import { Setting } from '../../models/Setting';
 import { config } from '../config';
 import { logger } from '../logger/logger';
+import { publicMediaService } from './publicMediaService';
 
 export interface MetaThreadsPublishResponse {
   id: string;
@@ -30,10 +31,23 @@ export class ThreadsService {
     redirectUri?: string;
     message?: string;
   }> {
-    await connectMongo();
-    const setting = await Setting.findOne();
-    const appId = process.env.THREADS_APP_ID || setting?.threads?.appId || config.threadsAppId;
-    const targetRedirectUri = redirectUri || setting?.threads?.redirectUri || config.threadsRedirectUri;
+    let setting = null;
+    try {
+      await connectMongo();
+      setting = await Setting.findOne();
+    } catch {
+      // Graceful fallback to env/config
+    }
+    const appId =
+      process.env.THREADS_APP_ID ||
+      process.env.THREADSAPP_ID ||
+      setting?.threads?.appId ||
+      config.threadsAppId;
+    const targetRedirectUri =
+      redirectUri ||
+      process.env.THREADS_REDIRECT_URI ||
+      setting?.threads?.redirectUri ||
+      config.threadsRedirectUri;
 
     if (!appId) {
       return {
@@ -61,23 +75,41 @@ export class ThreadsService {
    * and saves or updates the account in MongoDB.
    */
   public async handleOAuthCallback(code: string, redirectUri?: string): Promise<IThreadsAccountDocument> {
-    await connectMongo();
-    const setting = await Setting.findOne();
-    const appId = process.env.THREADS_APP_ID || setting?.threads?.appId || config.threadsAppId;
-    const appSecret = process.env.THREADS_APP_SECRET || setting?.threads?.appSecret || config.threadsAppSecret;
-    const targetRedirectUri = redirectUri || setting?.threads?.redirectUri || config.threadsRedirectUri;
+    let setting = null;
+    try {
+      await connectMongo();
+      setting = await Setting.findOne();
+    } catch {
+      // Graceful fallback to env/config
+    }
+    const appId =
+      process.env.THREADS_APP_ID ||
+      process.env.THREADSAPP_ID ||
+      setting?.threads?.appId ||
+      config.threadsAppId;
+    const appSecret =
+      process.env.THREADS_APP_SECRET ||
+      process.env.THREADSAPP_SECRET ||
+      setting?.threads?.appSecret ||
+      config.threadsAppSecret;
+    const targetRedirectUri =
+      redirectUri ||
+      process.env.THREADS_REDIRECT_URI ||
+      setting?.threads?.redirectUri ||
+      config.threadsRedirectUri;
 
     if (!appId || !appSecret) {
       throw new Error('THREADS_APP_ID and THREADS_APP_SECRET must be configured for OAuth token exchange.');
     }
 
-    // 1. Exchange code for short-lived token
+    // 1. Sanitize code and exchange for short-lived token
+    const sanitizedCode = code.replace(/#_.*$/, '').replace(/#.*$/, '').trim();
     const tokenParams = new URLSearchParams();
     tokenParams.append('client_id', appId);
     tokenParams.append('client_secret', appSecret);
     tokenParams.append('grant_type', 'authorization_code');
     tokenParams.append('redirect_uri', targetRedirectUri);
-    tokenParams.append('code', code);
+    tokenParams.append('code', sanitizedCode);
 
     const tokenRes = await fetch('https://graph.threads.net/oauth/access_token', {
       method: 'POST',
@@ -120,6 +152,7 @@ export class ThreadsService {
     let displayName = username;
     let profilePictureUrl = '';
     let biography = '';
+    let accurateUserId = userId;
 
     try {
       const profileRes = await fetch(
@@ -129,6 +162,7 @@ export class ThreadsService {
       );
       const profileData = await profileRes.json();
       if (profileRes.ok && profileData.id) {
+        accurateUserId = String(profileData.id);
         username = profileData.username || username;
         displayName = profileData.name || username;
         profilePictureUrl = profileData.threads_profile_picture_url || '';
@@ -139,13 +173,12 @@ export class ThreadsService {
     }
 
     // 4. Upsert into ThreadsAccount
-    let account = await ThreadsAccount.findOne({ userId });
-    if (!account) {
-      account = await ThreadsAccount.findOne({ username });
-    }
+    let account = await ThreadsAccount.findOne({
+      $or: [{ userId: accurateUserId }, { userId }, { username }],
+    });
 
     if (account) {
-      account.userId = userId;
+      account.userId = accurateUserId;
       account.username = username;
       account.displayName = displayName;
       if (profilePictureUrl) account.profilePictureUrl = profilePictureUrl;
@@ -157,7 +190,7 @@ export class ThreadsService {
       await account.save();
     } else {
       account = await ThreadsAccount.create({
-        userId,
+        userId: accurateUserId,
         username,
         displayName,
         profilePictureUrl,
@@ -484,8 +517,15 @@ export class ThreadsService {
 
       if (item.mediaUrl) {
         if (item.mediaType === 'VIDEO') {
+          const localPath = await publicMediaService.resolveLocalFilePath({
+            mediaUrl: item.mediaUrl,
+            filename: post.videoSource?.filename,
+            jobId: post.videoSource?.jobId,
+            partIndex: post.videoSource?.partIndex,
+          });
+          const publicUrl = await publicMediaService.ensurePublicVideoUrl(item.mediaUrl, localPath);
           params.append('media_type', 'VIDEO');
-          params.append('video_url', item.mediaUrl);
+          params.append('video_url', publicUrl);
         } else {
           params.append('media_type', 'IMAGE');
           params.append('image_url', item.mediaUrl);
@@ -503,8 +543,8 @@ export class ThreadsService {
         params.append('reply_to_id', parentCreationId);
       }
 
-      // 1. Create Media Container
-      const createRes = await fetch(`${baseUrl}/${account.userId}/threads`, {
+      // 1. Create Media Container (using 'me' endpoint for guaranteed identity resolution)
+      const createRes = await fetch(`${baseUrl}/me/threads`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: params.toString(),
@@ -522,12 +562,12 @@ export class ThreadsService {
         await this.pollContainerStatus(baseUrl, containerId, token!);
       }
 
-      // 3. Publish container
+      // 3. Publish container (using 'me' endpoint)
       const pubParams = new URLSearchParams();
       pubParams.append('access_token', token!);
       pubParams.append('creation_id', containerId);
 
-      const pubRes = await fetch(`${baseUrl}/${account.userId}/threads_publish`, {
+      const pubRes = await fetch(`${baseUrl}/me/threads_publish`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: pubParams.toString(),
@@ -556,14 +596,14 @@ export class ThreadsService {
         replyParams.append('media_type', 'TEXT');
         replyParams.append('reply_to_id', firstPublishedId);
 
-        const replyCreate = await fetch(`${baseUrl}/${account.userId}/threads`, {
+        const replyCreate = await fetch(`${baseUrl}/me/threads`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body: replyParams.toString(),
         });
         const replyData = await replyCreate.json();
         if (replyData.id) {
-          const pubReply = await fetch(`${baseUrl}/${account.userId}/threads_publish`, {
+          const pubReply = await fetch(`${baseUrl}/me/threads_publish`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: new URLSearchParams({ access_token: token!, creation_id: replyData.id }).toString(),
@@ -636,9 +676,180 @@ export class ThreadsService {
   }
 
   /**
-   * Computes holistic analytics & insights (Replacing Blacktwist), optionally filtered by accountId
+   * Fetches real live analytics from Meta Threads Insights API for an account
    */
-  public async getAnalyticsSummary(accountId?: string): Promise<{
+  public async syncLiveAccountAnalytics(accountId?: string): Promise<{
+    syncedPosts: number;
+    followerCount: number;
+    totalViews: number;
+    totalLikes: number;
+    totalReplies: number;
+  }> {
+    await connectMongo();
+
+    let account: IThreadsAccountDocument | null = null;
+    if (accountId && accountId !== 'all') {
+      account =
+        (await ThreadsAccount.findById(accountId)) ||
+        (await ThreadsAccount.findOne({
+          $or: [{ userId: accountId }, { username: accountId.replace(/^@/, '') }],
+        }));
+    } else {
+      account = await ThreadsAccount.findOne({ isActive: true, accessToken: { $exists: true, $ne: '' } });
+    }
+
+    if (!account) {
+      return { syncedPosts: 0, followerCount: 0, totalViews: 0, totalLikes: 0, totalReplies: 0 };
+    }
+
+    if (account.isSimulated || !account.accessToken) {
+      return {
+        syncedPosts: 0,
+        followerCount: account.followerCount || 0,
+        totalViews: 0,
+        totalLikes: 0,
+        totalReplies: 0,
+      };
+    }
+
+    const token = account.accessToken;
+    const baseUrl = 'https://graph.threads.net/v1.0';
+
+    // 1. Fetch live Profile stats
+    try {
+      const meRes = await fetch(
+        `${baseUrl}/me?fields=id,username,name,threads_profile_picture_url,threads_biography&access_token=${encodeURIComponent(
+          token
+        )}`
+      );
+      const meData = await meRes.json();
+      if (meRes.ok && meData.id) {
+        if (meData.username) account.username = meData.username;
+        if (meData.name) account.displayName = meData.name;
+        if (meData.threads_profile_picture_url) account.profilePictureUrl = meData.threads_profile_picture_url;
+        await account.save();
+      }
+    } catch (err) {
+      logger.system('warn', 'THREADS_LIVE_PROFILE_SYNC_ERR', `Failed to sync profile: ${err}`);
+    }
+
+    // 2. Fetch Account-wide User Insights from Meta Threads API
+    let accountViews = 0;
+    let accountLikes = 0;
+    let accountReplies = 0;
+    let accountReposts = 0;
+    let accountQuotes = 0;
+    let followersCount = account.followerCount || 0;
+
+    try {
+      const insightsUrl = `${baseUrl}/me/threads_insights?metric=views,likes,replies,reposts,quotes,followers_count&access_token=${encodeURIComponent(
+        token
+      )}`;
+      const inRes = await fetch(insightsUrl);
+      const inData = await inRes.json();
+
+      if (inRes.ok && Array.isArray(inData.data)) {
+        for (const metric of inData.data) {
+          const val = metric.total_value?.value ?? metric.values?.[0]?.value ?? 0;
+          if (metric.name === 'views') accountViews = Number(val);
+          if (metric.name === 'likes') accountLikes = Number(val);
+          if (metric.name === 'replies') accountReplies = Number(val);
+          if (metric.name === 'reposts') accountReposts = Number(val);
+          if (metric.name === 'quotes') accountQuotes = Number(val);
+          if (metric.name === 'followers_count') {
+            followersCount = Number(val);
+            account.followerCount = followersCount;
+            await account.save();
+          }
+        }
+        logger.system(
+          'info',
+          'THREADS_LIVE_USER_INSIGHTS_SYNCED',
+          `Synced account insights for @${account.username}: ${accountViews} views, ${followersCount} followers`
+        );
+      }
+    } catch (err) {
+      logger.system('warn', 'THREADS_LIVE_INSIGHTS_ERR', `Failed to fetch user insights: ${err}`);
+    }
+
+    // 3. Fetch published posts for this account
+    const posts = await ThreadsPost.find({
+      $or: [{ accountId: account._id }, { userId: account.userId }, { username: account.username }],
+      status: 'published',
+    });
+
+    let syncedPosts = 0;
+
+    for (const post of posts) {
+      const mediaId = post.posts?.[0]?.threadsMediaId || post.threadsContainerId;
+      if (!mediaId) continue;
+
+      try {
+        let views = 0;
+        let likes = 0;
+        let replies = 0;
+        let reposts = 0;
+        let quotes = 0;
+
+        const mediaInRes = await fetch(
+          `${baseUrl}/${mediaId}/insights?metric=views,likes,replies,reposts,quotes&access_token=${encodeURIComponent(
+            token
+          )}`
+        );
+        const mediaInData = await mediaInRes.json();
+        if (mediaInRes.ok && Array.isArray(mediaInData.data)) {
+          for (const m of mediaInData.data) {
+            const val = m.total_value?.value ?? m.values?.[0]?.value ?? 0;
+            if (m.name === 'views') views = Number(val);
+            if (m.name === 'likes') likes = Number(val);
+            if (m.name === 'replies') replies = Number(val);
+            if (m.name === 'reposts') reposts = Number(val);
+            if (m.name === 'quotes') quotes = Number(val);
+          }
+        }
+
+        const totalEngagements = likes + replies + reposts + quotes;
+        const engagementRate = views > 0 ? parseFloat(((totalEngagements / views) * 100).toFixed(1)) : 0;
+
+        post.analytics = {
+          views,
+          likes,
+          replies,
+          reposts,
+          quotes,
+          engagementRate,
+          lastSyncedAt: new Date(),
+        };
+        await post.save();
+        syncedPosts++;
+      } catch (err) {
+        logger.system('warn', 'THREADS_MEDIA_INSIGHTS_ERR', `Failed to sync post ${mediaId}: ${err}`);
+      }
+    }
+
+    return {
+      syncedPosts,
+      followerCount: account.followerCount || 0,
+      totalViews: accountViews,
+      totalLikes: accountLikes,
+      totalReplies: accountReplies,
+    };
+  }
+
+  /**
+   * Computes holistic analytics & insights, optionally filtered by accountId and synced with live Meta APIs
+   */
+  public async getAnalyticsSummary(
+    accountId?: string,
+    syncLive = false
+  ): Promise<{
+    account?: {
+      username: string;
+      displayName: string;
+      followerCount: number;
+      isLive: boolean;
+      lastSyncedAt?: Date;
+    } | null;
     totals: {
       impressions: number;
       likes: number;
@@ -652,14 +863,33 @@ export class ThreadsService {
     timeseries: Array<{ date: string; views: number; likes: number; replies: number }>;
     bestTimesToPost: Array<{ hour: string; engagementScore: number; recommendation: string; isPrimeSlot: boolean }>;
     topPosts: IThreadsPostDocument[];
+    syncedFromMeta: boolean;
   }> {
     await connectMongo();
+
+    let targetAccount: IThreadsAccountDocument | null = null;
+    if (accountId && accountId !== 'all') {
+      targetAccount =
+        (await ThreadsAccount.findById(accountId)) ||
+        (await ThreadsAccount.findOne({
+          $or: [{ userId: accountId }, { username: accountId.replace(/^@/, '') }],
+        }));
+    } else {
+      targetAccount = await ThreadsAccount.findOne({ isActive: true });
+    }
+
+    let syncedFromMeta = false;
+    if (syncLive && targetAccount && !targetAccount.isSimulated && targetAccount.accessToken) {
+      await this.syncLiveAccountAnalytics(targetAccount._id.toString());
+      syncedFromMeta = true;
+    }
+
     const query: Record<string, unknown> = { status: 'published' };
     const schedQuery: Record<string, unknown> = { status: 'scheduled' };
 
     if (accountId && accountId !== 'all') {
-      query.$or = [{ accountId }, { username: accountId }];
-      schedQuery.$or = [{ accountId }, { username: accountId }];
+      query.$or = [{ accountId }, { userId: accountId }, { username: accountId.replace(/^@/, '') }];
+      schedQuery.$or = [{ accountId }, { userId: accountId }, { username: accountId.replace(/^@/, '') }];
     }
 
     const allPosts = await ThreadsPost.find(query).sort({ 'analytics.views': -1 });
@@ -693,7 +923,6 @@ export class ThreadsService {
       d.setDate(d.getDate() - i);
       const dateStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
-      // Daily totals: calculate from actual views/likes without fake minimums
       const dailyViews = totalViews > 0 ? Math.floor(totalViews / 14) : 0;
       const dailyLikes = totalLikes > 0 ? Math.floor(totalLikes / 14) : 0;
       const dailyReplies = totalReplies > 0 ? Math.floor(totalReplies / 14) : 0;
@@ -716,19 +945,29 @@ export class ThreadsService {
     ];
 
     return {
+      account: targetAccount
+        ? {
+            username: targetAccount.username,
+            displayName: targetAccount.displayName || targetAccount.username,
+            followerCount: targetAccount.followerCount || 0,
+            isLive: !targetAccount.isSimulated && !!targetAccount.accessToken,
+            lastSyncedAt: new Date(),
+          }
+        : null,
       totals: {
-        impressions: totalViews || 1420,
-        likes: totalLikes || 118,
-        replies: totalReplies || 34,
-        reposts: totalReposts || 19,
-        quotes: totalQuotes || 8,
-        avgEngagementRate: avgEngagementRate || 5.2,
+        impressions: totalViews,
+        likes: totalLikes,
+        replies: totalReplies,
+        reposts: totalReposts,
+        quotes: totalQuotes,
+        avgEngagementRate,
         totalPosts: allPosts.length,
         scheduledCount: scheduledPosts.length,
       },
       timeseries,
       bestTimesToPost: primeSlots,
       topPosts: allPosts.slice(0, 5),
+      syncedFromMeta,
     };
   }
 }

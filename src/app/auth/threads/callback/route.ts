@@ -23,7 +23,8 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const account = await threadsService.handleOAuthCallback(code);
+    const sanitizedCode = code.replace(/#_.*$/, '').replace(/#.*$/, '').trim();
+    const account = await threadsService.handleOAuthCallback(sanitizedCode);
     logger.system('info', 'THREADS_OAUTH_SUCCESS', `Connected Meta Threads Account @${account.username}`);
 
     return NextResponse.redirect(

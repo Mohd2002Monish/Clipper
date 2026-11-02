@@ -152,6 +152,11 @@ export interface ISystemSetting {
     appSecret?: string;
     redirectUri?: string;
   };
+  facebook?: {
+    appId?: string;
+    appSecret?: string;
+    redirectUri?: string;
+  };
   defaults: {
     reframeMode: string;
     qualityPreset: string;

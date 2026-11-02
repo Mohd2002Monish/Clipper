@@ -44,6 +44,9 @@ import {
   Play,
   Film,
   Image,
+  UploadCloud,
+  FolderOpen,
+  FileVideo,
 } from 'lucide-react';
 import { NoticeModal } from './ui/NoticeModal';
 
@@ -172,6 +175,11 @@ export function InstagramPublisherView({ initialSubTab = 'composer' }: Instagram
   const [coverUrl, setCoverUrl] = useState<string>('');
   const [shareToFeed, setShareToFeed] = useState<boolean>(true);
   const [selectedVideoTitle, setSelectedVideoTitle] = useState<string>('');
+  const [uploadedSavedFilename, setUploadedSavedFilename] = useState<string>('');
+  const [selectedVideoSize, setSelectedVideoSize] = useState<number | null>(null);
+  const [isUploadingLocalVideo, setIsUploadingLocalVideo] = useState<boolean>(false);
+  const [showManualUrlInput, setShowManualUrlInput] = useState<boolean>(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // First comment CTA state
   const [firstCommentEnabled, setFirstCommentEnabled] = useState<boolean>(true);
@@ -309,22 +317,38 @@ export function InstagramPublisherView({ initialSubTab = 'composer' }: Instagram
     }
   }, [statusFilter, accountFilter, searchQuery]);
 
-  // 4. Fetch Analytics
-  const fetchAnalytics = useCallback(async () => {
-    setIsLoadingAnalytics(true);
-    try {
-      const query = analyticsAccountFilter !== 'all' ? `?account=${encodeURIComponent(analyticsAccountFilter)}` : '';
-      const res = await fetch(`/api/instagram/analytics${query}`);
-      const data = await res.json();
-      if (data.success) {
-        setAnalyticsData(data);
+  // 4. Fetch Analytics (with live Meta Graph API sync support)
+  const fetchAnalytics = useCallback(
+    async (syncLive = false) => {
+      setIsLoadingAnalytics(true);
+      try {
+        const target =
+          analyticsAccountFilter !== 'all' ? analyticsAccountFilter : selectedAccount?._id || 'all';
+        const params = new URLSearchParams();
+        if (target && target !== 'all') params.append('account', target);
+        if (syncLive) params.append('sync', 'true');
+
+        const res = await fetch(`/api/instagram/analytics?${params.toString()}`);
+        const data = await res.json();
+        if (data.success) {
+          setAnalyticsData(data);
+          if (syncLive) {
+            setNotice({
+              isOpen: true,
+              title: 'Live Meta Analytics Synced',
+              message: `Fetched real-time metrics and follower data from Instagram Graph API for @${data.account?.username || 'account'}.`,
+              type: 'success',
+            });
+          }
+        }
+      } catch {
+        // Ignore
+      } finally {
+        setIsLoadingAnalytics(false);
       }
-    } catch {
-      // Ignore
-    } finally {
-      setIsLoadingAnalytics(false);
-    }
-  }, [analyticsAccountFilter]);
+    },
+    [analyticsAccountFilter, selectedAccount]
+  );
 
   // 5. Fetch Studio Rendered Videos
   const fetchStudioRenderedVideos = async () => {
@@ -382,7 +406,7 @@ export function InstagramPublisherView({ initialSubTab = 'composer' }: Instagram
         setNotice({
           isOpen: true,
           title: 'Instagram Account Connected!',
-          message: `Successfully connected @${u} via Meta Instagram OAuth. You can now compose, schedule, and publish Reels!`,
+          message: `Successfully connected @${u} via Instagram Login. You can now compose, schedule, and publish Reels!`,
           type: 'success',
         });
         window.history.replaceState({}, '', '/?tab=instagram-composer');
@@ -428,6 +452,57 @@ export function InstagramPublisherView({ initialSubTab = 'composer' }: Instagram
   // Insert Hashtag Bundle
   const handleInsertHashtags = (tags: string) => {
     setCaption((prev) => (prev ? `${prev}\n\n${tags}` : tags));
+  };
+
+  // Handle local file selection from PC
+  const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Reset input so re-selecting the same file works if needed
+    e.target.value = '';
+
+    setIsUploadingLocalVideo(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const res = await fetch('/api/upload/direct', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to upload video from local PC.');
+      }
+
+      const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
+      const absoluteUrl = `${origin}${data.downloadUrl}`;
+      setMediaUrl(absoluteUrl);
+      setSelectedVideoTitle(data.originalFilename || file.name);
+      setUploadedSavedFilename(data.savedFilename || '');
+      if (data.sizeBytes) {
+        setSelectedVideoSize(data.sizeBytes);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setNotice({
+        isOpen: true,
+        title: 'Video Selection Failed',
+        message: msg,
+        type: 'error',
+      });
+    } finally {
+      setIsUploadingLocalVideo(false);
+    }
+  };
+
+  const handleClearSelectedVideo = () => {
+    setSelectedVideoTitle('');
+    setUploadedSavedFilename('');
+    setSelectedVideoSize(null);
+    setMediaUrl('');
   };
 
   // Select Video Part from Studio
@@ -509,7 +584,7 @@ export function InstagramPublisherView({ initialSubTab = 'composer' }: Instagram
         autoRepost: { enabled: true, delaysHours: [168, 336] },
         videoSource: {
           sourceType: mediaUrl.includes('/api/download/') ? 'part' : mediaUrl ? 'local' : 'none',
-          filename: selectedVideoTitle || undefined,
+          filename: uploadedSavedFilename || selectedVideoTitle || undefined,
         },
       };
 
@@ -923,7 +998,7 @@ export function InstagramPublisherView({ initialSubTab = 'composer' }: Instagram
                         : 'bg-emerald-950/70 text-emerald-400 border border-emerald-600/40'
                     }`}
                   >
-                    {selectedAccount.isSimulated ? 'Sandbox' : 'Meta OAuth'}
+                    {selectedAccount.isSimulated ? 'Sandbox' : 'Instagram Login'}
                   </span>
                   <ChevronDown className="w-3.5 h-3.5 text-slate-400 group-hover:text-white ml-0.5" />
                 </button>
@@ -953,6 +1028,7 @@ export function InstagramPublisherView({ initialSubTab = 'composer' }: Instagram
                       type="button"
                       onClick={() => {
                         setIsAccountDropdownOpen(false);
+                        setModalTab('manage');
                         setIsManageAccountsModalOpen(true);
                       }}
                       className="text-pink-400 hover:text-pink-300 font-semibold text-[10px]"
@@ -1109,7 +1185,7 @@ export function InstagramPublisherView({ initialSubTab = 'composer' }: Instagram
                             : 'bg-emerald-100 text-emerald-700'
                         }`}
                       >
-                        {selectedAccount.isSimulated ? 'Sandbox' : 'Meta OAuth'}
+                        {selectedAccount.isSimulated ? 'Sandbox' : 'Instagram Login'}
                       </span>
                     </div>
                     <div className="text-[11px] text-slate-500 truncate">
@@ -1128,7 +1204,7 @@ export function InstagramPublisherView({ initialSubTab = 'composer' }: Instagram
                     >
                       {accounts.map((acc) => (
                         <option key={acc._id || acc.instagramUserId} value={acc._id || acc.instagramUserId}>
-                          @{acc.username} ({acc.isSimulated ? 'Sandbox' : 'OAuth'})
+                          @{acc.username} ({acc.isSimulated ? 'Sandbox' : 'Instagram'})
                         </option>
                       ))}
                     </select>
@@ -1191,52 +1267,162 @@ export function InstagramPublisherView({ initialSubTab = 'composer' }: Instagram
 
             {/* Media Attachment Card */}
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 space-y-3">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
                   <Video className="w-4 h-4 text-pink-600" />
                   Video Media Source
                 </span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    fetchStudioRenderedVideos();
-                    setIsVideoPickerOpen(true);
-                  }}
-                  className="text-xs font-bold text-pink-600 hover:text-pink-700 hover:bg-pink-50 px-2.5 py-1 rounded-lg border border-pink-200 transition-all flex items-center gap-1.5"
-                >
-                  <Layers className="w-3.5 h-3.5" />
-                  Pick from Studio Splits
-                </button>
-              </div>
-
-              {selectedVideoTitle && (
-                <div className="p-2.5 bg-pink-50/70 border border-pink-200 rounded-xl flex items-center justify-between text-xs text-pink-900">
-                  <div className="flex items-center gap-2 truncate">
-                    <CheckCircle2 className="w-4 h-4 text-pink-600 shrink-0" />
-                    <span className="font-semibold truncate">{selectedVideoTitle}</span>
-                  </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isUploadingLocalVideo}
+                    className="text-xs font-bold bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-700 hover:to-rose-700 text-white px-3 py-1.5 rounded-lg shadow-sm transition-all flex items-center gap-1.5 disabled:opacity-50"
+                  >
+                    <UploadCloud className="w-3.5 h-3.5" />
+                    <span>Choose File from PC</span>
+                  </button>
                   <button
                     type="button"
                     onClick={() => {
-                      setSelectedVideoTitle('');
-                      setMediaUrl('');
+                      fetchStudioRenderedVideos();
+                      setIsVideoPickerOpen(true);
                     }}
-                    className="text-pink-600 hover:text-pink-800 p-0.5"
+                    className="text-xs font-bold text-pink-600 hover:text-pink-700 hover:bg-pink-50 px-2.5 py-1.5 rounded-lg border border-pink-200 transition-all flex items-center gap-1.5"
                   >
-                    <X className="w-4 h-4" />
+                    <Layers className="w-3.5 h-3.5" />
+                    <span>Pick from Studio Splits</span>
                   </button>
+                </div>
+              </div>
+
+              {/* Hidden Native File Input */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="video/mp4,video/quicktime,video/x-matroska,video/*"
+                onChange={handleFileSelected}
+                className="hidden"
+              />
+
+              {/* Uploading progress indicator */}
+              {isUploadingLocalVideo && (
+                <div className="p-4 rounded-xl bg-pink-50 border border-pink-200 flex items-center justify-center gap-3 text-xs text-pink-700 animate-pulse">
+                  <RefreshCw className="w-4 h-4 animate-spin text-pink-600" />
+                  <span className="font-semibold">Loading video from your local computer...</span>
                 </div>
               )}
 
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-500 uppercase">Direct Video URL (MP4 / MOV)</label>
-                <input
-                  type="text"
-                  value={mediaUrl}
-                  onChange={(e) => setMediaUrl(e.target.value)}
-                  placeholder="https://... or choose from Studio Splits above"
-                  className="w-full text-xs font-mono border border-slate-300 rounded-xl px-3 py-2 outline-none focus:border-pink-500"
-                />
+              {/* Selected Video Display Box */}
+              {(selectedVideoTitle || mediaUrl) && !isUploadingLocalVideo ? (
+                <div className="p-3 bg-gradient-to-r from-pink-50 via-purple-50/40 to-white border border-pink-200 rounded-xl flex items-center justify-between text-xs shadow-2xs">
+                  <div className="flex items-center gap-3 truncate min-w-0">
+                    <div className="p-2 rounded-lg bg-pink-600 text-white shrink-0 shadow-sm">
+                      <FileVideo className="w-4 h-4" />
+                    </div>
+                    <div className="truncate">
+                      <div className="font-bold text-slate-800 truncate">
+                        {selectedVideoTitle || 'Selected Video'}
+                      </div>
+                      <div className="text-[10px] text-pink-600 font-mono mt-0.5 flex items-center gap-2">
+                        {selectedVideoSize && (
+                          <span>{(selectedVideoSize / (1024 * 1024)).toFixed(1)} MB</span>
+                        )}
+                        <span className="inline-flex items-center gap-1 font-semibold text-emerald-600">
+                          <CheckCircle2 className="w-3 h-3" /> Ready to publish
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0 ml-2">
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="text-[11px] font-semibold text-pink-700 hover:text-pink-900 px-2 py-1 rounded hover:bg-pink-100 transition-colors"
+                    >
+                      Change
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleClearSelectedVideo}
+                      className="p-1 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                      title="Remove attached video"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                /* Empty state when no video is chosen yet */
+                !isUploadingLocalVideo && (
+                  <div
+                    onClick={() => fileInputRef.current?.click()}
+                    className="border-2 border-dashed border-pink-200 hover:border-pink-400 bg-pink-50/30 hover:bg-pink-50/60 rounded-xl p-5 text-center cursor-pointer transition-all space-y-2 group"
+                  >
+                    <div className="mx-auto w-10 h-10 rounded-xl bg-pink-100 text-pink-600 group-hover:scale-105 transition-transform flex items-center justify-center shadow-xs">
+                      <UploadCloud className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-slate-800">
+                        Choose Video from Local PC
+                      </div>
+                      <div className="text-[11px] text-slate-500 mt-0.5">
+                        MP4, MOV, or MKV video file from your computer
+                      </div>
+                    </div>
+                    <div className="pt-1 flex items-center justify-center gap-2">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          fileInputRef.current?.click();
+                        }}
+                        className="text-xs font-bold bg-pink-600 hover:bg-pink-700 text-white px-3.5 py-1.5 rounded-lg shadow-sm transition-all"
+                      >
+                        Browse Local Files
+                      </button>
+                    </div>
+                  </div>
+                )
+              )}
+
+              {/* Optional Manual URL Input Toggle */}
+              <div className="pt-1">
+                {!showManualUrlInput ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowManualUrlInput(true)}
+                    className="text-[11px] font-semibold text-slate-400 hover:text-slate-600 flex items-center gap-1 transition-colors"
+                  >
+                    <span>Or enter video URL manually</span>
+                    <ChevronDown className="w-3 h-3" />
+                  </button>
+                ) : (
+                  <div className="space-y-1 pt-1 border-t border-slate-100">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[10px] font-bold text-slate-500 uppercase">Direct Video URL (MP4 / MOV)</label>
+                      <button
+                        type="button"
+                        onClick={() => setShowManualUrlInput(false)}
+                        className="text-[10px] text-slate-400 hover:text-slate-600"
+                      >
+                        Hide
+                      </button>
+                    </div>
+                    <input
+                      type="text"
+                      value={mediaUrl}
+                      onChange={(e) => {
+                        setMediaUrl(e.target.value);
+                        if (!selectedVideoTitle && e.target.value) {
+                          setSelectedVideoTitle('Direct URL Video');
+                        }
+                      }}
+                      placeholder="https://... or choose file above"
+                      className="w-full text-xs font-mono border border-slate-300 rounded-xl px-3 py-2 outline-none focus:border-pink-500"
+                    />
+                  </div>
+                )}
               </div>
 
               {mediaType === 'REELS' && (
@@ -1699,6 +1885,80 @@ export function InstagramPublisherView({ initialSubTab = 'composer' }: Instagram
       {/* ============================================================== */}
       {subTab === 'analytics' && (
         <div className="space-y-6">
+          {/* Live Sync & Account Filter Bar */}
+          <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-pink-500 to-rose-500 text-white flex items-center justify-center shadow-sm">
+                <Instagram className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-bold text-slate-900">
+                    {analyticsData?.account
+                      ? `@${analyticsData.account.username}`
+                      : 'Instagram Account Performance'}
+                  </h3>
+                  <span
+                    className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${
+                      analyticsData?.account?.isLive
+                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                        : 'bg-slate-100 text-slate-600'
+                    }`}
+                  >
+                    {analyticsData?.account?.isLive ? 'Live Meta Graph API' : 'Sandbox / Mock'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-3 text-xs text-slate-500 mt-0.5">
+                  {analyticsData?.account && (
+                    <>
+                      <span>
+                        <strong className="text-slate-800 font-semibold">
+                          {(analyticsData.account.followerCount || 0).toLocaleString()}
+                        </strong>{' '}
+                        followers
+                      </span>
+                      <span>&bull;</span>
+                      <span>
+                        <strong className="text-slate-800 font-semibold">
+                          {analyticsData.account.mediaCount || 0}
+                        </strong>{' '}
+                        media
+                      </span>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {/* Account Dropdown */}
+              <select
+                value={analyticsAccountFilter}
+                onChange={(e) => setAnalyticsAccountFilter(e.target.value)}
+                className="px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 bg-slate-50 hover:bg-slate-100 outline-hidden transition-colors"
+              >
+                <option value="all">All Accounts</option>
+                {accounts.map((acc) => (
+                  <option key={acc._id} value={acc._id}>
+                    @{acc.username}
+                  </option>
+                ))}
+              </select>
+
+              {/* Sync Live Meta Analytics Button */}
+              <button
+                type="button"
+                onClick={() => fetchAnalytics(true)}
+                disabled={isLoadingAnalytics}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-500 hover:to-rose-500 text-white text-xs font-semibold shadow-xs disabled:opacity-50 transition-all"
+                title="Fetch real metrics from Instagram Graph API"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isLoadingAnalytics ? 'animate-spin' : ''}`} />
+                <span>{isLoadingAnalytics ? 'Syncing...' : 'Sync Live Analytics'}</span>
+              </button>
+            </div>
+          </div>
+
           {/* KPI Cards Grid */}
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
             <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
@@ -1889,7 +2149,7 @@ export function InstagramPublisherView({ initialSubTab = 'composer' }: Instagram
                     <div className="flex items-center gap-2">
                       <Globe className={`w-4 h-4 ${oauthStatus.configured ? 'text-pink-600' : 'text-amber-600'}`} />
                       <span className="text-xs font-bold text-slate-900">
-                        {oauthStatus.configured ? 'Meta Instagram Graph API Ready' : 'Meta OAuth Setup Required'}
+                        {oauthStatus.configured ? 'Direct Instagram Login Ready' : 'Instagram Login Setup Required'}
                       </span>
                     </div>
                     <span
@@ -1905,13 +2165,13 @@ export function InstagramPublisherView({ initialSubTab = 'composer' }: Instagram
 
                   <p className="text-xs text-slate-600 mt-2 leading-relaxed">
                     {oauthStatus.configured
-                      ? 'Authenticate and link multiple Meta Instagram creator or business accounts with official Graph API access tokens.'
-                      : 'To connect live Instagram accounts via OAuth, configure your Meta App ID and App Secret below or in Settings.'}
+                      ? 'Authenticate and link multiple Instagram Creator or Business accounts directly without Facebook Pages.'
+                      : 'To connect live Instagram accounts directly, configure your Instagram Client ID and Client Secret below or in Settings.'}
                   </p>
 
                   <div className="mt-3 pt-3 border-t border-slate-200/60 flex items-center justify-between text-[11px] text-slate-500">
                     <div>
-                      Redirect URI: <code className="bg-white/80 px-1.5 py-0.5 rounded border border-slate-200 text-slate-700 font-mono">http://localhost:3000/auth/instagram/callback</code>
+                      Redirect URI: <code className="bg-white/80 px-1.5 py-0.5 rounded border border-slate-200 text-slate-700 font-mono">{oauthStatus.redirectUri || 'http://localhost:3000/auth/instagram/callback'}</code>
                     </div>
                     <button
                       type="button"
@@ -1930,7 +2190,7 @@ export function InstagramPublisherView({ initialSubTab = 'composer' }: Instagram
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
                         <Key className="w-3.5 h-3.5 text-pink-600" />
-                        Meta Developer App Credentials
+                        Instagram App Credentials
                       </span>
                       <a
                         href="https://developers.facebook.com/apps/"
@@ -1996,7 +2256,7 @@ export function InstagramPublisherView({ initialSubTab = 'composer' }: Instagram
                       className="w-full py-3 bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-700 hover:to-purple-700 text-white font-bold text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-pink-500/25 flex items-center justify-center gap-2 transition-all"
                     >
                       <Globe className="w-4 h-4" />
-                      Authorize & Connect in Current Browser
+                      Connect Instagram Account
                     </button>
 
                     {/* Action 2: Multi-Account OAuth Workflow */}
@@ -2004,16 +2264,16 @@ export function InstagramPublisherView({ initialSubTab = 'composer' }: Instagram
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-bold text-pink-950 flex items-center gap-1.5">
                           <Users className="w-3.5 h-3.5 text-pink-600" />
-                          Add 2nd, 3rd, or Additional Account via OAuth
+                          Connect Another Account
                         </span>
                       </div>
                       <p className="text-[11px] text-pink-900/80 leading-relaxed">
-                        Meta authorizes whichever account is currently signed in on Facebook / Instagram in your browser. To link another account:
+                        Instagram authorizes whichever account is currently signed in on instagram.com in your browser. To link another account:
                       </p>
                       <ol className="text-[11px] text-slate-600 space-y-1 list-decimal list-inside pl-1">
                         <li>Click <strong>Copy OAuth Link</strong> below.</li>
-                        <li>Open a <strong>Private / Incognito window</strong> (or switch account on Instagram).</li>
-                        <li>Paste the link and approve access. You will be redirected back with both accounts active!</li>
+                        <li>Open a <strong>Private / Incognito window</strong> (or switch account on instagram.com).</li>
+                        <li>Paste the link and approve access. Both accounts will be connected and switchable!</li>
                       </ol>
 
                       <div className="pt-1">
@@ -2039,6 +2299,18 @@ export function InstagramPublisherView({ initialSubTab = 'composer' }: Instagram
                           )}
                         </button>
                       </div>
+
+                      {/* Visual Setup Guide Link */}
+                      <a
+                        href="/?tab=meta-guide"
+                        className="flex items-center justify-between p-2.5 rounded-xl bg-white hover:bg-pink-100/60 border border-pink-200 text-pink-900 transition-all text-xs font-semibold"
+                      >
+                        <div className="flex items-center gap-2">
+                          <Compass className="w-3.5 h-3.5 text-pink-600" />
+                          <span>View Step-by-Step Meta Setup Guide with Screenshots</span>
+                        </div>
+                        <ExternalLink className="w-3 h-3 text-pink-600" />
+                      </a>
                     </div>
                   </div>
                 )}
@@ -2140,7 +2412,7 @@ export function InstagramPublisherView({ initialSubTab = 'composer' }: Instagram
                                     : 'bg-emerald-100 text-emerald-700'
                                 }`}
                               >
-                                {acc.isSimulated ? 'Sandbox' : 'Meta OAuth'}
+                                {acc.isSimulated ? 'Sandbox' : 'Instagram Login'}
                               </span>
                             </div>
                             <div className="text-[11px] text-slate-400 truncate">
@@ -2183,7 +2455,7 @@ export function InstagramPublisherView({ initialSubTab = 'composer' }: Instagram
                         <div className="flex items-center gap-1.5">
                           <span className={`h-1.5 w-1.5 rounded-full ${acc.isSimulated ? 'bg-purple-500' : 'bg-emerald-500'}`} />
                           <span>
-                            {acc.isSimulated ? 'Simulation Mode' : 'OAuth Token Active'}
+                            {acc.isSimulated ? 'Simulation Mode' : 'Direct Login Active'}
                           </span>
                         </div>
 
