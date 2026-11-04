@@ -65,7 +65,13 @@ export class PipelineOrchestrator {
           targetDriveFolderId = await driveService.ensureSubfolder(targetDriveFolderId, videoFolderName);
         }
       } catch (err: unknown) {
-        logger.drive('warn', 'SUBFOLDER_SETUP_ERROR', `Failed setting up Drive destination subfolder: ${err}`, jobId);
+        const errMsg = err instanceof Error ? err.message : String(err);
+        logger.drive('warn', 'SUBFOLDER_SETUP_ERROR', `Failed setting up Drive destination subfolder: ${errMsg}`, jobId);
+        if (errMsg.includes('invalid_grant') || errMsg.includes('unauthorized') || errMsg.includes('Invalid Credentials')) {
+          logger.drive('warn', 'DRIVE_AUTH_EXPIRED_FALLBACK', `Google Drive token expired (${errMsg}). Automatically falling back destination to local storage to ensure successful render.`, jobId);
+          job.settings.outputFormat.destination = 'local';
+          await Job.updateOne({ _id: jobId }, { $set: { 'settings.outputFormat.destination': 'local' } });
+        }
       }
     }
 
@@ -238,21 +244,38 @@ export class PipelineOrchestrator {
           } catch (upErr: unknown) {
             const upErrMsg = upErr instanceof Error ? upErr.message : String(upErr);
             logger.drive('error', 'PART_DRIVE_UPLOAD_FAILED', `Drive upload failed for part ${part.index}: ${upErrMsg}`, jobId, part.index);
-            part.status = 'failed';
-            part.lastError = `Drive upload failed: ${upErrMsg}`;
-            await Part.updateOne(
-              { _id: part._id },
-              {
-                $set: {
-                  status: 'failed',
-                  lastError: `Drive upload failed: ${upErrMsg}`,
-                },
-              }
-            );
 
-            failedCount++;
-            job.counts.failed = failedCount;
-            await job.save();
+            // If failure is due to Google Drive token expiration (invalid_grant), fall back gracefully to local storage
+            if (upErrMsg.includes('invalid_grant') || upErrMsg.includes('unauthorized') || upErrMsg.includes('Invalid Credentials')) {
+              logger.drive('warn', 'DRIVE_FALLBACK_TO_LOCAL', `Preserved local rendered video for Part ${part.index} due to Drive auth expiration.`, jobId, part.index);
+              part.status = 'rendered';
+              part.lastError = `Saved locally (Google Drive token expired: ${upErrMsg}). You can download this clip or reconnect Google Drive in Settings.`;
+              await Part.updateOne(
+                { _id: part._id },
+                {
+                  $set: {
+                    status: 'rendered',
+                    lastError: part.lastError,
+                  },
+                }
+              );
+            } else {
+              part.status = 'failed';
+              part.lastError = `Drive upload failed: ${upErrMsg}`;
+              await Part.updateOne(
+                { _id: part._id },
+                {
+                  $set: {
+                    status: 'failed',
+                    lastError: `Drive upload failed: ${upErrMsg}`,
+                  },
+                }
+              );
+
+              failedCount++;
+              job.counts.failed = failedCount;
+              await job.save();
+            }
           }
         }
       } catch (partErr: unknown) {

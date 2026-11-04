@@ -18,9 +18,13 @@ import {
   Info,
   Globe,
   Instagram,
+  BookOpen,
+  Activity,
 } from 'lucide-react';
 import { CustomSelect } from './ui/CustomSelect';
 import { NoticeModal } from './ui/NoticeModal';
+import { MetaConnectionGuideView } from './MetaConnectionGuideView';
+import { McpServerDocsView } from './McpServerDocsView';
 
 interface SettingsData {
   googleDrive: {
@@ -56,7 +60,20 @@ interface SettingsData {
   };
 }
 
-export function SettingsLogsView() {
+export type SettingsSection = 'general' | 'meta-guide' | 'mcp' | 'logs';
+
+export interface SettingsLogsViewProps {
+  initialSection?: SettingsSection;
+}
+
+export function SettingsLogsView({ initialSection = 'general' }: SettingsLogsViewProps) {
+  const [activeSection, setActiveSection] = useState<SettingsSection>(initialSection);
+
+  useEffect(() => {
+    if (initialSection) {
+      setActiveSection(initialSection);
+    }
+  }, [initialSection]);
   const [settings, setSettings] = useState<SettingsData | null>(null);
   const [folderInput, setFolderInput] = useState('');
   const [isSaving, setIsSaving] = useState(false);
@@ -337,20 +354,88 @@ export function SettingsLogsView() {
 
   return (
     <div className="flex flex-col gap-6">
-      {/* Top Banner */}
-      <div className="bg-white rounded-2xl p-6 border border-[#90CAF9] shadow-sm">
-        <h2 className="text-lg font-bold text-[#0D47A1] mb-1 flex items-center gap-2">
-          <Settings className="w-5 h-5 text-[#2196F3]" />
-          Settings & Section 8 Diagnostics
-        </h2>
-        <p className="text-xs text-slate-500">
-          Configure Google Drive OAuth / Service Account destination, rendering limits, and inspect real-time JSON Lines system logs.
-        </p>
+      {/* Top Banner & Hub Navigation */}
+      <div className="bg-white rounded-2xl p-6 border border-[#90CAF9] shadow-sm flex flex-col gap-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-bold text-[#0D47A1] mb-1 flex items-center gap-2">
+              <Settings className="w-5 h-5 text-[#2196F3]" />
+              Settings, Documentation &amp; Diagnostics Hub
+            </h2>
+            <p className="text-xs text-slate-500">
+              Manage Google Drive storage, Meta connection guides, Model Context Protocol (MCP) server endpoints, and real-time logs.
+            </p>
+          </div>
+          <span className="self-start sm:self-auto text-[11px] font-semibold px-2.5 py-1 rounded-full bg-[#E3F2FD] text-[#0D47A1] border border-[#90CAF9]">
+            System Hub
+          </span>
+        </div>
+
+        {/* Section Navigation Tabs */}
+        <div className="flex items-center gap-2 border-t border-[#90CAF9]/40 pt-4 overflow-x-auto">
+          <button
+            type="button"
+            onClick={() => setActiveSection('general')}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all ${
+              activeSection === 'general'
+                ? 'bg-[#2196F3] text-white shadow-md shadow-[#2196F3]/25'
+                : 'bg-slate-100 hover:bg-slate-200/80 text-slate-600'
+            }`}
+          >
+            <Settings className="w-3.5 h-3.5" />
+            <span>General &amp; Storage</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveSection('meta-guide')}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all ${
+              activeSection === 'meta-guide'
+                ? 'bg-purple-600 text-white shadow-md shadow-purple-600/25'
+                : 'bg-slate-100 hover:bg-slate-200/80 text-slate-600'
+            }`}
+          >
+            <BookOpen className="w-3.5 h-3.5" />
+            <span>Meta Setup Guide</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveSection('mcp')}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all ${
+              activeSection === 'mcp'
+                ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/25'
+                : 'bg-slate-100 hover:bg-slate-200/80 text-slate-600'
+            }`}
+          >
+            <Terminal className="w-3.5 h-3.5" />
+            <span>MCP Server &amp; API</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveSection('logs')}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all ${
+              activeSection === 'logs'
+                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/25'
+                : 'bg-slate-100 hover:bg-slate-200/80 text-slate-600'
+            }`}
+          >
+            <Activity className="w-3.5 h-3.5" />
+            <span>System Logs</span>
+          </button>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left Column: Google Drive & System Settings */}
-        <div className="lg:col-span-5 flex flex-col gap-6">
+      {/* SECTION 2: META SETUP GUIDE */}
+      {activeSection === 'meta-guide' && <MetaConnectionGuideView />}
+
+      {/* SECTION 3: MCP SERVER & API BRIDGE */}
+      {activeSection === 'mcp' && <McpServerDocsView />}
+
+      {/* SECTION 1: GENERAL & STORAGE */}
+      {activeSection === 'general' && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {/* Card 1: Google Drive */}
           <div className="bg-white rounded-2xl p-6 border border-[#90CAF9] shadow-sm flex flex-col gap-4">
             <div className="flex items-center justify-between pb-3 border-b border-[#90CAF9]/40">
@@ -633,6 +718,7 @@ export function SettingsLogsView() {
                   size="sm"
                   options={[
                     { value: 'blur', label: 'Blur Background (Fit)' },
+                    { value: 'image', label: 'Custom Picture Background' },
                     { value: 'solid', label: 'Solid Letterbox' },
                     { value: 'crop', label: 'Crop to Fill' },
                   ]}
@@ -763,9 +849,11 @@ export function SettingsLogsView() {
             )}
           </div>
         </div>
+      )}
 
-        {/* Right Column: Section 8 Interactive Log Viewer */}
-        <div className="lg:col-span-7 flex flex-col gap-4">
+      {/* SECTION 4: SECTION 8 REAL-TIME LOG VIEWER */}
+      {activeSection === 'logs' && (
+        <div className="w-full flex flex-col gap-4">
           <div className="bg-white rounded-2xl p-6 border border-[#90CAF9] shadow-sm flex flex-col gap-4 flex-1">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#90CAF9]/40">
               <div className="flex items-center gap-2">
@@ -872,7 +960,7 @@ export function SettingsLogsView() {
             </div>
           </div>
         </div>
-      </div>
+      )}
 
       <NoticeModal
         isOpen={notice.isOpen}

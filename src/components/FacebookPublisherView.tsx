@@ -204,8 +204,14 @@ export function FacebookPublisherView({ initialSubTab = 'composer' }: FacebookPu
       const data = await res.json();
       if (data.success && Array.isArray(data.accounts)) {
         setAccounts(data.accounts);
-        if (data.accounts.length > 0 && !selectedAccount) {
-          setSelectedAccount(data.accounts[0]);
+        if (data.accounts.length > 0) {
+          setSelectedAccount((prev) => {
+            if (prev) {
+              const matched = data.accounts.find((a: any) => a._id === prev._id || a.pageId === prev.pageId);
+              if (matched) return matched;
+            }
+            return data.accounts[0];
+          });
         }
       }
     } catch {
@@ -213,7 +219,7 @@ export function FacebookPublisherView({ initialSubTab = 'composer' }: FacebookPu
     } finally {
       setIsLoadingAccounts(false);
     }
-  }, [selectedAccount]);
+  }, []);
 
   // Fetch OAuth Status
   const fetchOAuthStatus = useCallback(async () => {
@@ -318,7 +324,16 @@ export function FacebookPublisherView({ initialSubTab = 'composer' }: FacebookPu
 
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
-      if (params.get('facebookConnected') === 'true') {
+      if (params.get('facebookWarning') === 'no_pages_found') {
+        setNotice({
+          isOpen: true,
+          title: 'No Facebook Pages Found',
+          message:
+            'Facebook login was successful, but Meta found 0 Facebook Pages managed by this account. Please verify that your Facebook profile is an Administrator of a Facebook Page and that you selected it during the login prompt.',
+          type: 'warning',
+        });
+        window.history.replaceState({}, '', '/?tab=facebook-composer');
+      } else if (params.get('facebookConnected') === 'true') {
         const page = params.get('pageName') || 'Page';
         setNotice({
           isOpen: true,
@@ -327,6 +342,7 @@ export function FacebookPublisherView({ initialSubTab = 'composer' }: FacebookPu
           type: 'success',
         });
         window.history.replaceState({}, '', '/?tab=facebook-composer');
+        fetchAccounts();
       } else if (params.get('facebookError')) {
         setNotice({
           isOpen: true,
@@ -517,7 +533,19 @@ export function FacebookPublisherView({ initialSubTab = 'composer' }: FacebookPu
         body: JSON.stringify(payload),
       });
 
-      const data = await res.json();
+      let data: any;
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        data = await res.json();
+      } else {
+        const text = await res.text();
+        throw new Error(
+          res.status >= 500
+            ? `Server processing error (${res.status}). The operation timed out or failed on the server.`
+            : `Server returned non-JSON response (${res.status}): ${text.slice(0, 100)}`
+        );
+      }
+
       if (!res.ok || !data.success) {
         throw new Error(data.error || 'Failed to submit Facebook post');
       }
@@ -676,6 +704,43 @@ export function FacebookPublisherView({ initialSubTab = 'composer' }: FacebookPu
   };
 
   // Trigger Facebook Login OAuth
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
+
+  const handleSyncPages = async () => {
+    setIsSyncing(true);
+    try {
+      const res = await fetch('/api/facebook/sync', { method: 'POST' });
+      const data = await res.json();
+      if (data.success && Array.isArray(data.accounts) && data.accounts.length > 0) {
+        setAccounts(data.accounts);
+        setSelectedAccount(data.accounts[0]);
+        setNotice({
+          isOpen: true,
+          title: 'Facebook Pages Synced',
+          message: `Successfully connected ${data.accounts.length} Facebook Page(s): ${data.accounts
+            .map((a: any) => a.pageName)
+            .join(', ')}.`,
+          type: 'success',
+        });
+      } else if (data.success && data.count === 0) {
+        setNotice({
+          isOpen: true,
+          title: 'No Pages Found',
+          message:
+            'No Facebook Pages found. Please click "Connect via Facebook Login" to grant access to Monish and Mk memes.',
+          type: 'warning',
+        });
+      } else {
+        throw new Error(data.error || 'Failed to sync Facebook pages.');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setNotice({ isOpen: true, title: 'Sync Failed', message: msg, type: 'error' });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   const handleConnectOAuth = async () => {
     try {
       const res = await fetch('/api/facebook/auth');
@@ -739,7 +804,7 @@ export function FacebookPublisherView({ initialSubTab = 'composer' }: FacebookPu
                     </div>
                     <span className="truncate max-w-[130px]">{selectedAccount.pageName}</span>
                     <span className="text-[10px] px-1.5 py-0.2 rounded bg-blue-100 text-blue-700 font-bold">
-                      {selectedAccount.isSimulated ? 'Sandbox' : 'Live'}
+                      Live Page
                     </span>
                   </>
                 ) : (
@@ -792,6 +857,18 @@ export function FacebookPublisherView({ initialSubTab = 'composer' }: FacebookPu
                     >
                       <Facebook className="w-3.5 h-3.5" />
                       Connect via Facebook Login
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isSyncing}
+                      onClick={() => {
+                        setIsAccountDropdownOpen(false);
+                        handleSyncPages();
+                      }}
+                      className="w-full text-left px-3 py-1.5 rounded-lg text-xs text-blue-700 hover:bg-blue-50 font-medium flex items-center gap-2"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+                      {isSyncing ? 'Syncing Pages...' : 'Sync Pages from Meta'}
                     </button>
                     <button
                       type="button"

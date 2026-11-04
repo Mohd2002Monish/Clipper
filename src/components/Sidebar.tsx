@@ -27,13 +27,22 @@ import {
   GitBranch,
   BookOpen,
   Compass,
+  Calendar,
+  Share2,
+  FolderGit2,
+  Users,
+  Smartphone,
 } from 'lucide-react';
 
 export type TabType =
   | 'new-job'
+  | 'clip-ingest'
   | 'queue'
   | 'history'
-  | 'waterfall'
+  | 'media-library'
+  | 'omni-composer'
+  | 'calendar'
+  | 'vault-crm'
   | 'youtube'
   | 'uploaded-videos'
   | 'threads-composer'
@@ -74,7 +83,7 @@ interface SubMenuItem {
 }
 
 interface MenuGroup {
-  id: 'videos' | 'syndication' | 'youtube' | 'threads' | 'instagram' | 'facebook';
+  id: 'videos' | 'growth' | 'youtube' | 'threads' | 'instagram' | 'facebook';
   label: string;
   description: string;
   icon: React.ComponentType<{ className?: string }>;
@@ -125,6 +134,26 @@ export function Sidebar({
           activeBg: 'bg-blue-600 text-white shadow-md shadow-blue-600/30 font-semibold',
         },
         {
+          id: 'media-library',
+          label: 'Media Asset Library',
+          description: 'Visual asset hub & syndication',
+          icon: FolderGit2,
+          accent: 'text-cyan-400',
+          badge: 'Hub',
+          badgeColor: 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 font-semibold',
+          activeBg: 'bg-cyan-600 text-white shadow-md shadow-cyan-600/30 font-semibold',
+        },
+        {
+          id: 'clip-ingest',
+          label: 'Mobile Clip Ingest',
+          description: 'Phone queue & Drive staging',
+          icon: Smartphone,
+          accent: 'text-sky-400',
+          badge: 'Cloud',
+          badgeColor: 'bg-sky-500/20 text-sky-300 border border-sky-500/30 font-semibold',
+          activeBg: 'bg-sky-600 text-white shadow-md shadow-sky-600/30 font-semibold',
+        },
+        {
           id: 'queue',
           label: 'Job Queue',
           description: 'Active rendering tasks',
@@ -145,24 +174,44 @@ export function Sidebar({
       ],
     },
     {
-      id: 'syndication',
-      label: 'Syndication',
-      description: 'Cascade & auto-reschedule',
-      icon: Workflow,
-      accent: 'text-cyan-400',
-      iconBg: 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20',
-      badge: 'Auto',
-      badgeColor: 'bg-cyan-600 text-white font-bold',
+      id: 'growth',
+      label: 'Publish & Growth',
+      description: 'Omni-posting, calendar & CRM',
+      icon: Share2,
+      accent: 'text-purple-400',
+      iconBg: 'bg-purple-500/10 text-purple-400 border border-purple-500/20',
+      badge: 'Hub',
+      badgeColor: 'bg-purple-600 text-white font-bold',
       items: [
         {
-          id: 'waterfall',
-          label: 'Waterfall & Reschedule',
-          description: 'Cross-platform cascade loop',
-          icon: GitBranch,
-          accent: 'text-cyan-400',
-          badge: 'Smart',
-          badgeColor: 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 font-semibold',
-          activeBg: 'bg-cyan-600 text-white shadow-md shadow-cyan-600/30 font-semibold',
+          id: 'omni-composer',
+          label: 'Omni-Post Studio',
+          description: 'One-click 4-channel cross-post',
+          icon: Share2,
+          accent: 'text-purple-400',
+          badge: 'Omni',
+          badgeColor: 'bg-purple-500/20 text-purple-300 border border-purple-500/30 font-semibold',
+          activeBg: 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-md shadow-purple-600/30 font-semibold',
+        },
+        {
+          id: 'calendar',
+          label: 'Visual Calendar',
+          description: '5 Golden slots schedule grid',
+          icon: Calendar,
+          accent: 'text-amber-400',
+          badge: '5 Slots',
+          badgeColor: 'bg-amber-500/20 text-amber-300 border border-amber-500/30 font-semibold',
+          activeBg: 'bg-amber-600 text-white shadow-md shadow-amber-600/30 font-semibold',
+        },
+        {
+          id: 'vault-crm',
+          label: 'Movie Vault CRM',
+          description: 'Track #VAULT leads & outreach',
+          icon: Users,
+          accent: 'text-emerald-400',
+          badge: 'Leads',
+          badgeColor: 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-semibold',
+          activeBg: 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30 font-semibold',
         },
       ],
     },
@@ -230,24 +279,6 @@ export function Sidebar({
           accent: 'text-indigo-400',
           activeBg: 'bg-purple-600 text-white shadow-md shadow-purple-600/30 font-semibold',
         },
-        {
-          id: 'threads-mcp',
-          label: 'MCP Server & API',
-          description: 'Antigravity & AI integration',
-          icon: Terminal,
-          badge: 'Ready',
-          badgeColor: 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold',
-          accent: 'text-emerald-400',
-          activeBg: 'bg-purple-600 text-white shadow-md shadow-purple-600/30 font-semibold',
-        },
-        {
-          id: 'meta-guide',
-          label: 'Meta Setup Guide',
-          description: 'Step-by-step account guide',
-          icon: BookOpen,
-          accent: 'text-purple-400',
-          activeBg: 'bg-purple-600 text-white shadow-md shadow-purple-600/30 font-semibold',
-        },
       ],
     },
     {
@@ -284,14 +315,6 @@ export function Sidebar({
           accent: 'text-indigo-400',
           activeBg: 'bg-gradient-to-r from-pink-600 to-rose-600 text-white shadow-md shadow-pink-600/30 font-semibold',
         },
-        {
-          id: 'meta-guide',
-          label: 'Meta Setup Guide',
-          description: 'Step-by-step account guide',
-          icon: BookOpen,
-          accent: 'text-pink-400',
-          activeBg: 'bg-gradient-to-r from-pink-600 to-rose-600 text-white shadow-md shadow-pink-600/30 font-semibold',
-        },
       ],
     },
     {
@@ -326,14 +349,6 @@ export function Sidebar({
           description: 'Reach, views & reactions',
           icon: BarChart3,
           accent: 'text-indigo-400',
-          activeBg: 'bg-blue-600 text-white shadow-md shadow-blue-600/30 font-semibold',
-        },
-        {
-          id: 'meta-guide',
-          label: 'Meta Setup Guide',
-          description: 'Step-by-step account guide',
-          icon: BookOpen,
-          accent: 'text-blue-400',
           activeBg: 'bg-blue-600 text-white shadow-md shadow-blue-600/30 font-semibold',
         },
       ],
@@ -502,47 +517,13 @@ export function Sidebar({
         {/* System & Settings Section */}
         <div className="pt-2 border-t border-slate-800/60 space-y-1">
           <div className="px-3 pb-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-            System & Help
+            System & Settings
           </div>
-          <button
-            type="button"
-            onClick={() => onTabChange('meta-guide')}
-            className={`w-full text-left flex items-center justify-between px-3 py-2.5 rounded-xl transition-all duration-150 group ${
-              activeTab === 'meta-guide'
-                ? 'bg-purple-600 text-white shadow-md shadow-purple-600/30 font-semibold'
-                : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-            }`}
-          >
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div
-                className={`p-1.5 rounded-lg transition-colors ${
-                  activeTab === 'meta-guide'
-                    ? 'bg-white/20 text-white'
-                    : 'bg-slate-800/80 group-hover:bg-slate-800 text-purple-400'
-                }`}
-              >
-                <Compass className="w-4 h-4" />
-              </div>
-              <div className="truncate">
-                <div className="text-xs font-medium leading-none">Meta Setup Guide</div>
-                <div
-                  className={`text-[10px] mt-1 leading-none truncate ${
-                    activeTab === 'meta-guide' ? 'text-purple-100' : 'text-slate-400'
-                  }`}
-                >
-                  Instagram & Threads docs
-                </div>
-              </div>
-            </div>
-            <span className="text-[9px] px-1.5 py-0.5 rounded-full uppercase tracking-wider font-semibold bg-purple-500/20 text-purple-300 border border-purple-500/30">
-              Guide
-            </span>
-          </button>
           <button
             type="button"
             onClick={() => onTabChange('settings')}
             className={`w-full text-left flex items-center justify-between px-3 py-2.5 rounded-xl transition-all duration-150 group ${
-              activeTab === 'settings'
+              activeTab === 'settings' || activeTab === 'meta-guide' || activeTab === 'threads-mcp'
                 ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30 font-semibold'
                 : 'text-slate-300 hover:bg-slate-800 hover:text-white'
             }`}
@@ -550,24 +531,29 @@ export function Sidebar({
             <div className="flex items-center gap-2.5 min-w-0">
               <div
                 className={`p-1.5 rounded-lg transition-colors ${
-                  activeTab === 'settings'
+                  activeTab === 'settings' || activeTab === 'meta-guide' || activeTab === 'threads-mcp'
                     ? 'bg-white/20 text-white'
-                    : 'bg-slate-800/80 group-hover:bg-slate-800 text-slate-400'
+                    : 'bg-slate-800/80 group-hover:bg-slate-800 text-blue-400'
                 }`}
               >
                 <Settings className="w-4 h-4" />
               </div>
               <div className="truncate">
-                <div className="text-xs font-medium leading-none">Settings & Logs</div>
+                <div className="text-xs font-medium leading-none">Settings & Docs</div>
                 <div
                   className={`text-[10px] mt-1 leading-none truncate ${
-                    activeTab === 'settings' ? 'text-blue-100' : 'text-slate-400'
+                    activeTab === 'settings' || activeTab === 'meta-guide' || activeTab === 'threads-mcp'
+                      ? 'text-blue-100'
+                      : 'text-slate-400'
                   }`}
                 >
-                  Drive, system & worker
+                  Meta Guide, MCP & Logs
                 </div>
               </div>
             </div>
+            <span className="text-[9px] px-1.5 py-0.5 rounded-full uppercase tracking-wider font-semibold bg-blue-500/20 text-blue-300 border border-blue-500/30">
+              Hub
+            </span>
           </button>
         </div>
       </div>

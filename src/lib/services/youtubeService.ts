@@ -1,4 +1,5 @@
 import fs from 'fs';
+import path from 'path';
 import { google, youtube_v3 } from 'googleapis';
 import { config } from '../config';
 import { connectMongo } from '../db';
@@ -26,6 +27,7 @@ export interface UploadOptions {
   jobId?: string;
   partIndex?: number;
   partFilename?: string;
+  thumbnailPath?: string;
 }
 
 export class YouTubeService {
@@ -233,21 +235,19 @@ export class YouTubeService {
       throw new Error(`YouTube channel with ID "${options.channelId}" is not connected.`);
     }
 
-    // Auto-formatting for YouTube Shorts
+    // Title & User Caption/Description handling (Preserve user's exact text & hashtags)
     let finalTitle = options.title.trim();
-    let finalDescription = (options.description || '').trim();
+    const finalDescription = (options.description ?? '').trim();
 
-    if (options.videoType === 'short') {
-      if (!finalTitle.toLowerCase().includes('#shorts')) {
-        finalTitle = `${finalTitle} #Shorts`;
-      }
-      if (!finalDescription.toLowerCase().includes('#shorts')) {
-        finalDescription = `${finalDescription}\n\n#Shorts #ShortsVideo`;
-      }
+    if (options.videoType === 'short' && !finalTitle.toLowerCase().includes('#shorts')) {
+      finalTitle = `${finalTitle} #Shorts`;
     }
 
-    const finalTags = options.tags && options.tags.length > 0
-      ? options.tags
+    // Automatically parse any hashtags from the user's description (e.g. #Cinema #Shorts #Review)
+    const extractedHashtags = (finalDescription.match(/#[a-zA-Z0-9_]+/g) || []).map((t) => t.replace(/^#/, ''));
+    const combinedTags = Array.from(new Set([...(options.tags || []), ...extractedHashtags]));
+    const finalTags = combinedTags.length > 0
+      ? combinedTags
       : options.videoType === 'short'
       ? ['Shorts', 'YouTubeShorts', 'Video']
       : ['Video'];
@@ -268,6 +268,7 @@ export class YouTubeService {
       privacyStatus: options.privacyStatus,
       videoType: options.videoType,
       isMadeForKids: options.isMadeForKids ?? false,
+      thumbnailPath: options.thumbnailPath,
       status: 'uploading',
     });
 
@@ -342,6 +343,39 @@ export class YouTubeService {
       }
 
       const youtubeUrl = `https://youtu.be/${videoId}`;
+
+      // Upload Custom Thumbnail if provided
+      if (options.thumbnailPath && fs.existsSync(options.thumbnailPath)) {
+        try {
+          const thumbExt = path.extname(options.thumbnailPath).toLowerCase();
+          let mimeType = 'image/jpeg';
+          if (thumbExt === '.png') mimeType = 'image/png';
+          else if (thumbExt === '.webp') mimeType = 'image/webp';
+
+          logger.system(
+            'info',
+            'YOUTUBE_UPLOADING_THUMBNAIL',
+            `Uploading custom thumbnail for video ${videoId} from ${options.thumbnailPath}`
+          );
+
+          const thumbRes = await youtube.thumbnails.set({
+            videoId,
+            media: {
+              mimeType,
+              body: fs.createReadStream(options.thumbnailPath),
+            },
+          });
+
+          const uploadedThumbUrl =
+            thumbRes.data.items?.[0]?.default?.url ||
+            thumbRes.data.items?.[0]?.high?.url ||
+            `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
+          uploadRecord.thumbnailUrl = uploadedThumbUrl;
+          logger.system('info', 'YOUTUBE_THUMBNAIL_SET_SUCCESS', `Custom thumbnail set for video ${videoId}: ${uploadedThumbUrl}`);
+        } catch (thumbErr) {
+          logger.system('warn', 'YOUTUBE_THUMBNAIL_SET_WARNING', `Could not set custom thumbnail (note: YouTube requires account phone verification for custom thumbnails): ${thumbErr}`);
+        }
+      }
 
       uploadRecord.status = 'completed';
       uploadRecord.videoId = videoId;

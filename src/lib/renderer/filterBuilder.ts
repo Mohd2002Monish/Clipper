@@ -1,3 +1,4 @@
+import fs from 'fs';
 import { execSync } from 'child_process';
 import { ReframeMode, FocalPoint, TextSlotConfig } from '../../shared/schemas';
 import { VideoProbeData } from '../../shared/types';
@@ -51,7 +52,11 @@ export interface RenderRecipeOptions {
   targetDimensions: TargetDimensions;
   reframeMode: ReframeMode;
   backgroundColor?: string;
+  backgroundImagePath?: string;
+  backgroundBlur?: number;
+  backgroundDim?: number;
   focalPoint?: FocalPoint;
+  focalPointCoords?: { x: number; y: number };
   qualityPreset?: 'fast' | 'balanced' | 'high';
   probe: VideoProbeData;
   textOverlay?: TextOverlayRenderConfig;
@@ -79,7 +84,11 @@ export function buildRenderRecipe(options: RenderRecipeOptions): RenderRecipe {
     targetDimensions,
     reframeMode,
     backgroundColor = '#000000',
+    backgroundImagePath,
+    backgroundBlur = 0,
+    backgroundDim = 0,
     focalPoint = 'center',
+    focalPointCoords,
     qualityPreset = 'balanced',
     probe,
     textOverlay,
@@ -121,7 +130,23 @@ export function buildRenderRecipe(options: RenderRecipeOptions): RenderRecipe {
 
   if (isRatioIdentical) {
     filters.push(`${normChain}scale=${targetW}:${targetH}:flags=bicubic${currentVideoOut}`);
-  } else if (reframeMode === 'blur') {
+  } else if (reframeMode === 'image' && backgroundImagePath && fs.existsSync(backgroundImagePath)) {
+    // Custom Background Picture: scale & crop image to fill full canvas, then overlay fitted video centered
+    const escapedBg = escapeFilePathForFfmpeg(backgroundImagePath);
+    let bgChain = `movie='${escapedBg}':loop=0[bg_raw];[bg_raw]scale=${targetW}:${targetH}:force_original_aspect_ratio=increase,crop=${targetW}:${targetH}`;
+    if (backgroundBlur > 0) {
+      const blurRadius = Math.min(25, Math.max(1, Math.round(backgroundBlur / 2)));
+      bgChain += `,boxblur=${blurRadius}:2`;
+    }
+    if (backgroundDim > 0) {
+      const dimFactor = Math.max(0.1, (100 - backgroundDim) / 100);
+      bgChain += `,eq=brightness=${((dimFactor - 1) * 0.4).toFixed(2)}:contrast=${dimFactor.toFixed(2)}`;
+    }
+    bgChain += `[bg]`;
+    filters.push(bgChain);
+    filters.push(`${normChain}scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease[fg]`);
+    filters.push(`[bg][fg]overlay=(W-w)/2:(H-h)/2${currentVideoOut}`);
+  } else if (reframeMode === 'blur' || (reframeMode === 'image' && (!backgroundImagePath || !fs.existsSync(backgroundImagePath)))) {
     // High-performance blur: downscale background first (160px width), blur at low-res, then upscale to target resolution with bilinear filter.
     // This reduces boxblur pixel processing by ~98% while producing an ultra-smooth, flicker-free background.
     const lowW = 160;
@@ -142,6 +167,9 @@ export function buildRenderRecipe(options: RenderRecipeOptions): RenderRecipe {
     let cropX = `(in_w-${targetW})/2`;
     if (dynamicCropExpr) {
       cropX = dynamicCropExpr;
+    } else if (focalPointCoords && typeof focalPointCoords.x === 'number') {
+      const clampX = Math.max(0, Math.min(100, focalPointCoords.x)) / 100;
+      cropX = `(in_w-${targetW})*${clampX}`;
     } else if (focalPoint === 'left') {
       cropX = '0';
     } else if (focalPoint === 'right') {

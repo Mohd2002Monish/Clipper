@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Youtube,
   Folder,
@@ -33,6 +33,7 @@ import {
   TrendingUp,
   BarChart3,
   Cpu,
+  Image as ImageIcon,
 } from 'lucide-react';
 import { CustomSelect } from './ui/CustomSelect';
 import { NoticeModal } from './ui/NoticeModal';
@@ -131,6 +132,24 @@ export function YouTubePublisherView() {
   const [folders, setFolders] = useState<FolderOption[]>([]);
   const [selectedFolder, setSelectedFolder] = useState<string>('General');
   const [isLoadingFolders, setIsLoadingFolders] = useState(false);
+
+  // Pipeline / Folder Thumbnail & Caption Template state (applies to entire folder)
+  const [pipelineThumbnailUrl, setPipelineThumbnailUrl] = useState<string>('');
+  const [pipelineThumbnailPath, setPipelineThumbnailPath] = useState<string>('');
+  const [pipelineThumbnailName, setPipelineThumbnailName] = useState<string>('');
+  const [isUploadingPipelineThumb, setIsUploadingPipelineThumb] = useState<boolean>(false);
+  const pipelineThumbInputRef = useRef<HTMLInputElement>(null);
+  const [pipelineCaptionTemplate, setPipelineCaptionTemplate] = useState<string>('');
+
+  // Video-specific Thumbnail state (override)
+  const [videoThumbnailUrl, setVideoThumbnailUrl] = useState<string>('');
+  const [videoThumbnailPath, setVideoThumbnailPath] = useState<string>('');
+  const [videoThumbnailName, setVideoThumbnailName] = useState<string>('');
+  const [isUploadingVideoThumb, setIsUploadingVideoThumb] = useState<boolean>(false);
+  const videoThumbInputRef = useRef<HTMLInputElement>(null);
+
+  // Instant upload indicator
+  const [instantUploadingId, setInstantUploadingId] = useState<string | null>(null);
 
   // View mode tab state
   const [viewMode, setViewMode] = useState<'dispatcher' | 'uploaded-videos'>('dispatcher');
@@ -539,13 +558,153 @@ export function YouTubePublisherView() {
     const cleanTitle = video.title || video.name.replace(/\.[^/.]+$/, '');
     setUploadTitle(isShort ? `${cleanTitle} #Shorts` : cleanTitle);
 
-    setUploadDescription(
-      isShort
-        ? `Part of our series. Split & formatted with VideoTimmer.\n\n#Shorts #Viral #Video`
-        : `Original full video rendered and published with VideoTimmer.\n\nEnjoy and subscribe for more!`
-    );
+    // Inherit folder caption template if set, otherwise leave clean without canned test text
+    if (pipelineCaptionTemplate) {
+      setUploadDescription(pipelineCaptionTemplate);
+    } else {
+      setUploadDescription('');
+    }
+
+    // Inherit folder pipeline thumbnail if set
+    if (pipelineThumbnailPath && !videoThumbnailPath) {
+      setVideoThumbnailPath(pipelineThumbnailPath);
+      setVideoThumbnailUrl(pipelineThumbnailUrl);
+      setVideoThumbnailName(pipelineThumbnailName);
+    }
 
     setUploadTags(isShort ? 'Shorts, YouTubeShorts, Viral, Video' : 'Video, Longform, Original');
+  };
+
+  // Upload thumbnail for entire folder / pipeline
+  const handleUploadPipelineThumb = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      setIsUploadingPipelineThumb(true);
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch('/api/upload/thumbnail', {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to upload folder pipeline thumbnail.');
+      }
+      setPipelineThumbnailUrl(data.imageUrl);
+      setPipelineThumbnailPath(data.storedPath);
+      setPipelineThumbnailName(file.name);
+      showNotice(`Pipeline thumbnail updated for "${selectedFolder}" folder.`, 'success');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      showNotice(msg, 'error');
+    } finally {
+      setIsUploadingPipelineThumb(false);
+      if (pipelineThumbInputRef.current) {
+        pipelineThumbInputRef.current.value = '';
+      }
+    }
+  };
+
+  // Upload thumbnail override for single video
+  const handleUploadVideoThumb = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      setIsUploadingVideoThumb(true);
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch('/api/upload/thumbnail', {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to upload video thumbnail.');
+      }
+      setVideoThumbnailUrl(data.imageUrl);
+      setVideoThumbnailPath(data.storedPath);
+      setVideoThumbnailName(file.name);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      showNotice(msg, 'error');
+    } finally {
+      setIsUploadingVideoThumb(false);
+      if (videoThumbInputRef.current) {
+        videoThumbInputRef.current.value = '';
+      }
+    }
+  };
+
+  // Instant Upload video directly to YouTube
+  const handleInstantUpload = async (video: VideoFileItem, customTitle?: string, customDesc?: string) => {
+    const targetChannel = selectedChannelId || (accounts[0] ? accounts[0].channelId : '');
+    if (!targetChannel) {
+      showNotice('Please connect and select a YouTube channel first.', 'warning');
+      return;
+    }
+
+    try {
+      setInstantUploadingId(video.id);
+      const isShort = video.isShort || video.aspectRatio === '9:16' || video.duration <= 60;
+      const cleanTitle = video.title || video.name.replace(/\.[^/.]+$/, '');
+      const defaultTitle = isShort ? `${cleanTitle} #Shorts` : cleanTitle;
+      const titleToUse = customTitle || (selectedVideo?.id === video.id ? uploadTitle : defaultTitle);
+      const descToUse =
+        customDesc ||
+        (selectedVideo?.id === video.id && uploadDescription
+          ? uploadDescription
+          : pipelineCaptionTemplate || (isShort ? '#Shorts #Viral' : ''));
+
+      const activeThumb =
+        (selectedVideo?.id === video.id && videoThumbnailPath)
+          ? videoThumbnailPath
+          : pipelineThumbnailPath || undefined;
+
+      const payload = {
+        channelId: targetChannel,
+        folderName: video.folderName || selectedFolder,
+        sourceType: video.sourceType,
+        localPath: video.localPath,
+        driveFileId: video.driveFileId,
+        title: titleToUse,
+        description: descToUse,
+        tags: uploadTags.split(',').map((t) => t.trim()).filter(Boolean),
+        privacyStatus: uploadPrivacy,
+        videoType: isShort ? 'short' : 'long_form',
+        isMadeForKids,
+        jobId: video.jobId,
+        partIndex: video.partIndex,
+        partFilename: video.name,
+        thumbnailPath: activeThumb,
+      };
+
+      const res = await fetch('/api/youtube/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to instant upload video to YouTube.');
+      }
+
+      const watchUrl = data.upload?.youtubeUrl || `https://youtu.be/${data.upload?.videoId}`;
+      showNotice(
+        `Instant Upload Complete! Video published directly to YouTube: ${titleToUse}`,
+        'success'
+      );
+      setUploadSuccessUrl(watchUrl);
+      fetchHistory();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      showNotice(msg, 'error');
+    } finally {
+      setInstantUploadingId(null);
+    }
   };
 
   // Handle Video Type change
@@ -576,6 +735,8 @@ export function YouTubePublisherView() {
       setUploadError(null);
       setUploadProgressMsg('Initializing upload stream to YouTube API...');
 
+      const activeThumbnail = videoThumbnailPath || pipelineThumbnailPath || undefined;
+
       const payload = {
         channelId: selectedChannelId,
         folderName: selectedFolder,
@@ -591,6 +752,7 @@ export function YouTubePublisherView() {
         jobId: selectedVideo.jobId,
         partIndex: selectedVideo.partIndex,
         partFilename: selectedVideo.name,
+        thumbnailPath: activeThumbnail,
       };
 
       setUploadProgressMsg('Streaming video from source to YouTube...');
@@ -1295,6 +1457,97 @@ export function YouTubePublisherView() {
           </div>
         </div>
 
+        {/* Pipeline & Folder Thumbnail and Caption Defaults */}
+        <div className="bg-slate-50/80 rounded-xl border border-slate-200/90 p-4 space-y-3.5">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <ImageIcon className="w-4 h-4 text-rose-600" />
+              <span className="text-xs font-bold text-slate-800">
+                Folder Pipeline Defaults: <span className="text-rose-600">"{selectedFolder}"</span>
+              </span>
+              <span className="text-[10px] text-slate-500 font-normal">
+                (Thumbnails & captions configured here apply to all videos in this folder)
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <input
+                ref={pipelineThumbInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                onChange={handleUploadPipelineThumb}
+                className="hidden"
+                id="pipeline-thumbnail-upload"
+              />
+              <button
+                type="button"
+                disabled={isUploadingPipelineThumb}
+                onClick={() => pipelineThumbInputRef.current?.click()}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-slate-300 text-slate-700 hover:bg-slate-100 text-xs font-semibold shadow-sm transition-all"
+              >
+                <UploadCloud className="w-3.5 h-3.5 text-rose-600" />
+                <span>{isUploadingPipelineThumb ? 'Uploading...' : pipelineThumbnailPath ? 'Change Pipeline Thumbnail' : 'Upload Pipeline Thumbnail'}</span>
+              </button>
+
+              {pipelineThumbnailPath && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPipelineThumbnailUrl('');
+                    setPipelineThumbnailPath('');
+                    setPipelineThumbnailName('');
+                  }}
+                  className="p-1.5 text-slate-400 hover:text-red-500 rounded-lg hover:bg-red-50 transition-colors"
+                  title="Remove Pipeline Thumbnail"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
+            {pipelineThumbnailUrl ? (
+              <div className="md:col-span-3 flex items-center gap-3 bg-white p-2 rounded-lg border border-slate-200">
+                <img
+                  src={pipelineThumbnailUrl}
+                  alt="Pipeline Thumbnail"
+                  className="w-20 h-12 object-cover rounded border border-slate-200 shrink-0"
+                />
+                <div className="min-w-0">
+                  <div className="text-[11px] font-bold text-slate-700 truncate">{pipelineThumbnailName || 'Folder Thumbnail'}</div>
+                  <div className="text-[9px] text-emerald-600 font-semibold flex items-center gap-1">
+                    <CheckCircle2 className="w-2.5 h-2.5" /> Active for folder
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="md:col-span-3 text-[11px] text-slate-400 italic bg-white/60 p-2.5 rounded-lg border border-dashed border-slate-200">
+                No pipeline thumbnail set. Individual video cards can still override thumbnails.
+              </div>
+            )}
+
+            <div className="md:col-span-9 flex items-center gap-2">
+              <input
+                type="text"
+                value={pipelineCaptionTemplate}
+                onChange={(e) => setPipelineCaptionTemplate(e.target.value)}
+                placeholder="Folder caption & hashtags (e.g. Best scene from the movie #cinema #viral #review)..."
+                className="w-full bg-white border border-slate-300 text-slate-800 text-xs font-medium rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-rose-500/20"
+              />
+              {pipelineCaptionTemplate && selectedVideo && (
+                <button
+                  type="button"
+                  onClick={() => setUploadDescription(pipelineCaptionTemplate)}
+                  className="shrink-0 px-2.5 py-2 text-[10px] font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-lg border border-rose-200 transition-colors"
+                >
+                  Apply to Selected
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
         {/* Video Grid */}
         {isLoadingVideos ? (
           <div className="py-12 text-center text-slate-400 space-y-2">
@@ -1393,27 +1646,47 @@ export function YouTubePublisherView() {
                     </div>
                   </div>
 
-                  <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
-                    <span className="text-[11px] text-slate-400">
+                  <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
+                    <span className="text-[11px] text-slate-400 truncate">
                       Folder: <strong className="text-slate-600">{vid.folderName}</strong>
                     </span>
-                    <button
-                      className={`text-xs font-bold px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1 ${
-                        isSelected
-                          ? 'bg-blue-600 text-white shadow-sm'
-                          : 'bg-slate-100 text-slate-800 hover:bg-slate-200'
-                      }`}
-                    >
-                      {isSelected ? (
-                        <>
-                          <Check className="w-3 h-3" /> Selected
-                        </>
-                      ) : (
-                        <>
-                          <UploadCloud className="w-3 h-3" /> Select for Upload
-                        </>
-                      )}
-                    </button>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        disabled={instantUploadingId === vid.id}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleInstantUpload(vid);
+                        }}
+                        className="text-xs font-bold px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white shadow-sm transition-all flex items-center gap-1"
+                        title="Upload directly to YouTube immediately"
+                      >
+                        {instantUploadingId === vid.id ? (
+                          <RefreshCw className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <Zap className="w-3 h-3" />
+                        )}
+                        <span>{instantUploadingId === vid.id ? 'Uploading...' : 'Instant Upload'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className={`text-xs font-bold px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1 ${
+                          isSelected
+                            ? 'bg-blue-600 text-white shadow-sm'
+                            : 'bg-slate-100 text-slate-800 hover:bg-slate-200'
+                        }`}
+                      >
+                        {isSelected ? (
+                          <>
+                            <Check className="w-3 h-3" /> Selected
+                          </>
+                        ) : (
+                          <>
+                            <UploadCloud className="w-3 h-3" /> Select
+                          </>
+                        )}
+                      </button>
+                    </div>
                   </div>
                 </div>
               );
@@ -1560,6 +1833,95 @@ export function YouTubePublisherView() {
                     <span>Declared as "Made for Kids" (COPPA Compliance)</span>
                   </label>
                 </div>
+
+                {/* Video Thumbnail Override */}
+                <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                      <ImageIcon className="w-3.5 h-3.5 text-rose-600" />
+                      <span>Video Thumbnail (16:9 Image)</span>
+                    </label>
+                    {videoThumbnailPath && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setVideoThumbnailPath('');
+                          setVideoThumbnailUrl('');
+                          setVideoThumbnailName('');
+                        }}
+                        className="text-[10px] text-red-500 hover:underline font-semibold"
+                      >
+                        Reset to Default
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <input
+                      ref={videoThumbInputRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp"
+                      onChange={handleUploadVideoThumb}
+                      className="hidden"
+                      id="video-thumbnail-upload"
+                    />
+
+                    {videoThumbnailUrl ? (
+                      <div className="flex items-center gap-2.5">
+                        <img
+                          src={videoThumbnailUrl}
+                          alt="Video Thumbnail"
+                          className="w-24 h-14 object-cover rounded-lg border border-slate-300"
+                        />
+                        <div>
+                          <div className="text-[11px] font-bold text-slate-800 truncate max-w-[150px]">
+                            {videoThumbnailName || 'Custom Thumbnail'}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => videoThumbInputRef.current?.click()}
+                            className="text-[10px] text-blue-600 hover:underline font-semibold"
+                          >
+                            Change image
+                          </button>
+                        </div>
+                      </div>
+                    ) : pipelineThumbnailUrl ? (
+                      <div className="flex items-center gap-2.5">
+                        <img
+                          src={pipelineThumbnailUrl}
+                          alt="Inherited Pipeline Thumbnail"
+                          className="w-24 h-14 object-cover rounded-lg border border-slate-300"
+                        />
+                        <div>
+                          <div className="text-[10px] font-semibold text-slate-600">
+                            Using folder pipeline thumbnail
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => videoThumbInputRef.current?.click()}
+                            className="text-[10px] text-rose-600 hover:underline font-bold"
+                          >
+                            Upload override for this video
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={isUploadingVideoThumb}
+                        onClick={() => videoThumbInputRef.current?.click()}
+                        className="flex items-center gap-2 px-3 py-2 bg-white border border-slate-300 hover:bg-slate-100 rounded-lg text-xs font-semibold text-slate-700 shadow-sm transition-all"
+                      >
+                        <UploadCloud className="w-3.5 h-3.5 text-rose-600" />
+                        <span>{isUploadingVideoThumb ? 'Uploading...' : 'Upload Video Thumbnail'}</span>
+                      </button>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-slate-400">
+                    Supports JPG, PNG, WEBP. Requires YouTube phone verification for custom thumbnails.
+                  </p>
+                </div>
               </div>
 
               {/* Title & Description */}
@@ -1582,16 +1944,24 @@ export function YouTubePublisherView() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                    Description:
-                  </label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block text-xs font-bold text-slate-700">
+                      Caption & Description:
+                    </label>
+                    <span className="text-[10px] text-emerald-600 font-semibold flex items-center gap-1">
+                      <CheckCircle2 className="w-2.5 h-2.5" /> Direct to YouTube
+                    </span>
+                  </div>
                   <textarea
                     rows={4}
                     value={uploadDescription}
                     onChange={(e) => setUploadDescription(e.target.value)}
-                    placeholder="Enter description, links, hashtags..."
+                    placeholder="Enter description, links, hashtags. Text and #hashtags are sent directly to YouTube without test boilerplate..."
                     className="w-full bg-slate-50 border border-slate-300 text-slate-800 text-xs font-medium rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 resize-none"
                   />
+                  <div className="text-[10px] text-slate-400 mt-1">
+                    Your exact captions and #hashtags go straight to YouTube without test boilerplate.
+                  </div>
                 </div>
 
                 <div>
@@ -1645,31 +2015,52 @@ export function YouTubePublisherView() {
             )}
 
             {/* Actions */}
-            <div className="pt-4 border-t border-slate-100 flex items-center justify-end gap-3">
+            <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3">
               <button
                 type="button"
-                onClick={() => setSelectedVideo(null)}
-                className="px-4 py-2.5 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 transition-colors"
+                disabled={isUploading || !!instantUploadingId || accounts.length === 0}
+                onClick={() => selectedVideo && handleInstantUpload(selectedVideo)}
+                className="w-full sm:w-auto flex items-center justify-center gap-2 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow-md transition-all disabled:opacity-50"
               >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={isUploading || accounts.length === 0}
-                className="flex items-center gap-2 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white font-bold text-xs px-6 py-2.5 rounded-xl shadow-lg transition-all disabled:opacity-50"
-              >
-                {isUploading ? (
+                {instantUploadingId === selectedVideo.id ? (
                   <>
                     <RefreshCw className="w-4 h-4 animate-spin" />
-                    <span>Publishing to YouTube...</span>
+                    <span>Uploading Instantly...</span>
                   </>
                 ) : (
                   <>
-                    <Youtube className="w-4 h-4" />
-                    <span>Publish Video to YouTube</span>
+                    <Zap className="w-4 h-4" />
+                    <span>Instant Upload Now</span>
                   </>
                 )}
               </button>
+
+              <div className="flex items-center gap-2.5 w-full sm:w-auto justify-end">
+                <button
+                  type="button"
+                  onClick={() => setSelectedVideo(null)}
+                  className="px-4 py-2.5 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isUploading || !!instantUploadingId || accounts.length === 0}
+                  className="flex items-center gap-2 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white font-bold text-xs px-6 py-2.5 rounded-xl shadow-lg transition-all disabled:opacity-50"
+                >
+                  {isUploading ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>Publishing to YouTube...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Youtube className="w-4 h-4" />
+                      <span>Publish Video to YouTube</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </form>
         </div>

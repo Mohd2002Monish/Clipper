@@ -276,6 +276,10 @@ export class ThreadsService {
     isSimulated?: boolean;
   }): Promise<IThreadsAccountDocument> {
     await connectMongo();
+    if (!data.accessToken) {
+      throw new Error('An active Meta Threads access token is required to connect an account.');
+    }
+
     const cleanUsername = data.username.replace(/^@/, '').trim();
     const userId = 'usr_' + cleanUsername + '_' + Math.random().toString(36).substring(2, 7);
 
@@ -284,10 +288,8 @@ export class ThreadsService {
       existing.displayName = data.displayName || existing.displayName;
       if (data.biography) existing.biography = data.biography;
       if (data.profilePictureUrl) existing.profilePictureUrl = data.profilePictureUrl;
-      if (data.accessToken) {
-        existing.accessToken = data.accessToken;
-        existing.isSimulated = false;
-      }
+      existing.accessToken = data.accessToken;
+      existing.isSimulated = false;
       await existing.save();
       return existing;
     }
@@ -300,10 +302,10 @@ export class ThreadsService {
         data.profilePictureUrl ||
         'https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=150&auto=format&fit=crop&q=80',
       biography: data.biography || 'Movie recommendations & cinematic reels',
-      followerCount: data.followerCount || 1200,
-      accessToken: data.accessToken || '',
+      followerCount: data.followerCount || 0,
+      accessToken: data.accessToken,
       isActive: true,
-      isSimulated: !data.accessToken,
+      isSimulated: false,
     });
 
     return account;
@@ -441,52 +443,16 @@ export class ThreadsService {
     post.status = 'publishing';
     await post.save();
 
-    try {
-      // 1. If live Meta Threads Access Token is provided, call Meta Graph API
-      if (account?.accessToken && !account.isSimulated) {
-        return await this.publishToMetaApi(post, account);
-      }
-
-      // 2. Otherwise run High-Fidelity Native Simulation (Offline/Developer Mode)
-      const simulatedMediaId = 'th_' + Math.random().toString(36).substring(2, 11);
-      const permalink = `https://threads.net/@${post.username || 'creator'}/post/${simulatedMediaId}`;
-
-      post.status = 'published';
-      post.publishedAt = new Date();
-      post.threadsContainerId = simulatedMediaId;
-      post.threadsPermalink = permalink;
-
-      // Assign IDs to posts in thread
-      post.posts.forEach((item, idx) => {
-        item.threadsMediaId = `${simulatedMediaId}_part${idx + 1}`;
-      });
-
-      // Handle follow-up CTA if enabled
-      if (post.followUp?.enabled && post.followUp.text) {
-        post.followUp.status = 'published';
-        post.followUp.threadsReplyId = `${simulatedMediaId}_reply1`;
-      }
-
-      // Seed initial baseline engagement
-      const initialViews = Math.floor(Math.random() * 80) + 20;
-      const initialLikes = Math.floor(initialViews * 0.08) + 1;
-      const initialReplies = Math.floor(initialLikes * 0.25);
-      const initialReposts = Math.floor(initialLikes * 0.15);
-
-      post.analytics = {
-        views: initialViews,
-        likes: initialLikes,
-        replies: initialReplies,
-        reposts: initialReposts,
-        quotes: Math.floor(initialReposts * 0.4),
-        engagementRate: Number((((initialLikes + initialReplies + initialReposts) / initialViews) * 100).toFixed(1)),
-        lastSyncedAt: new Date(),
-      };
-
+    if (!account || !account.accessToken) {
+      const errorMsg = `No active Threads account or access token found for @${post.username}. Please connect via Meta Threads OAuth or add an access token.`;
+      post.status = 'failed';
+      post.error = errorMsg;
       await post.save();
-      logger.system('info', 'THREADS_PUBLISHED_SIMULATED', `Simulated thread published for @${post.username}: ${permalink}`);
+      throw new Error(errorMsg);
+    }
 
-      return { success: true, permalink };
+    try {
+      return await this.publishToMetaApi(post, account);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       post.status = 'failed';
@@ -643,35 +609,69 @@ export class ThreadsService {
   }
 
   /**
-   * Syncs metrics for a published thread
+   * Syncs real metrics for a published thread via Meta Threads Insights API
    */
   public async syncPostMetrics(postId: string): Promise<IThreadsPostDocument | null> {
     await connectMongo();
     const post = await ThreadsPost.findById(postId);
     if (!post || post.status !== 'published') return null;
 
-    // Simulate organic growth or fetch from Meta Insights API
-    const currentViews = post.analytics?.views || 50;
-    const addedViews = Math.floor(Math.random() * 25) + 3;
-    const newViews = currentViews + addedViews;
-    const newLikes = (post.analytics?.likes || 2) + (Math.random() > 0.4 ? 1 : 0);
-    const newReplies = (post.analytics?.replies || 0) + (Math.random() > 0.7 ? 1 : 0);
-    const newReposts = (post.analytics?.reposts || 0) + (Math.random() > 0.8 ? 1 : 0);
-    const newQuotes = (post.analytics?.quotes || 0) + (Math.random() > 0.9 ? 1 : 0);
+    const account =
+      (await ThreadsAccount.findById(post.accountId)) ||
+      (await ThreadsAccount.findOne({ username: post.username }));
 
-    const engagementRate = Number((((newLikes + newReplies + newReposts + newQuotes) / newViews) * 100).toFixed(1));
+    const mediaId = post.posts?.[0]?.threadsMediaId || post.threadsContainerId;
 
-    post.analytics = {
-      views: newViews,
-      likes: newLikes,
-      replies: newReplies,
-      reposts: newReposts,
-      quotes: newQuotes,
-      engagementRate,
-      lastSyncedAt: new Date(),
-    };
+    if (account?.accessToken && mediaId) {
+      try {
+        const baseUrl = 'https://graph.threads.net/v1.0';
+        const res = await fetch(
+          `${baseUrl}/${mediaId}/insights?metric=views,likes,replies,reposts,quotes&access_token=${encodeURIComponent(
+            account.accessToken
+          )}`
+        );
+        const data = await res.json();
+        if (res.ok && Array.isArray(data.data)) {
+          let views = post.analytics?.views || 0;
+          let likes = post.analytics?.likes || 0;
+          let replies = post.analytics?.replies || 0;
+          let reposts = post.analytics?.reposts || 0;
+          let quotes = post.analytics?.quotes || 0;
 
-    await post.save();
+          for (const m of data.data) {
+            const val = m.total_value?.value ?? m.values?.[0]?.value ?? 0;
+            if (m.name === 'views') views = Number(val);
+            if (m.name === 'likes') likes = Number(val);
+            if (m.name === 'replies') replies = Number(val);
+            if (m.name === 'reposts') reposts = Number(val);
+            if (m.name === 'quotes') quotes = Number(val);
+          }
+
+          const totalEng = likes + replies + reposts + quotes;
+          const engagementRate = views > 0 ? parseFloat(((totalEng / views) * 100).toFixed(1)) : 0;
+
+          post.analytics = {
+            views,
+            likes,
+            replies,
+            reposts,
+            quotes,
+            engagementRate,
+            lastSyncedAt: new Date(),
+          };
+
+          await post.save();
+          return post;
+        }
+      } catch (err) {
+        logger.system(
+          'warn',
+          'THREADS_INSIGHTS_SINGLE_POST_ERROR',
+          `Failed fetching live insights for thread media ${mediaId}: ${err}`
+        );
+      }
+    }
+
     return post;
   }
 

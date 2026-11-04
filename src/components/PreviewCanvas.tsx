@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Film, Activity, Eye, EyeOff, RefreshCw } from 'lucide-react';
+import { Film, Activity, Eye, EyeOff, RefreshCw, MoveHorizontal } from 'lucide-react';
 import { AspectRatioPreset, ReframeMode, TextOverlaySettings } from '@/shared/schemas';
 import { VideoProbeData } from '@/shared/types';
 import { evaluateTextTokens } from '@/lib/renderer/textProcessor';
@@ -11,7 +11,12 @@ interface PreviewCanvasProps {
   aspectRatio: AspectRatioPreset;
   reframeMode: ReframeMode;
   backgroundColor?: string;
+  backgroundImageUrl?: string;
+  backgroundBlur?: number;
+  backgroundDim?: number;
   focalPoint?: 'left' | 'center' | 'right' | 'auto_face';
+  focalPointCoords?: { x: number; y: number };
+  onFocalPointCoordsChange?: (coords: { x: number; y: number }) => void;
   probe?: VideoProbeData;
   textOverlay?: TextOverlaySettings;
   showSafeZone?: boolean;
@@ -25,7 +30,12 @@ export function PreviewCanvas({
   aspectRatio,
   reframeMode,
   backgroundColor = '#000000',
+  backgroundImageUrl,
+  backgroundBlur = 0,
+  backgroundDim = 0,
   focalPoint = 'center',
+  focalPointCoords = { x: 50, y: 50 },
+  onFocalPointCoordsChange,
   probe,
   textOverlay,
   showSafeZone = true,
@@ -88,7 +98,11 @@ export function PreviewCanvas({
             aspectRatio,
             reframeMode,
             backgroundColor,
+            backgroundImageUrl,
+            backgroundBlur,
+            backgroundDim,
             focalPoint,
+            focalPointCoords,
             timestamp: 1.0,
           }),
         });
@@ -110,7 +124,18 @@ export function PreviewCanvas({
       isMounted = false;
       clearTimeout(timer);
     };
-  }, [sourceFilename, aspectRatio, reframeMode, backgroundColor, focalPoint]);
+  }, [
+    sourceFilename,
+    aspectRatio,
+    reframeMode,
+    backgroundColor,
+    backgroundImageUrl,
+    backgroundBlur,
+    backgroundDim,
+    focalPoint,
+    focalPointCoords?.x,
+    focalPointCoords?.y,
+  ]);
 
   return (
     <div className="bg-white rounded-2xl p-5 border border-[#90CAF9]/60 shadow-sm flex flex-col gap-4">
@@ -161,6 +186,19 @@ export function PreviewCanvas({
               <div
                 className="absolute inset-0 transition-colors"
                 style={{ backgroundColor: backgroundColor || '#000000' }}
+              />
+            )}
+
+            {reframeMode === 'image' && (
+              <div
+                className="absolute inset-0 bg-cover bg-center transition-all"
+                style={{
+                  backgroundImage: backgroundImageUrl ? `url(${backgroundImageUrl})` : undefined,
+                  backgroundColor: '#000000',
+                  filter: `${backgroundBlur ? `blur(${backgroundBlur / 2}px)` : ''} ${
+                    backgroundDim ? `brightness(${Math.max(0.2, (100 - backgroundDim) / 100)})` : ''
+                  }`.trim(),
+                }}
               />
             )}
 
@@ -269,7 +307,7 @@ export function PreviewCanvas({
       <div className="text-[11px] text-slate-600 space-y-1.5 pt-2 border-t border-[#90CAF9]/40 font-medium">
         <div className="flex justify-between">
           <span className="text-slate-500">Reframe mode:</span>
-          <span className="text-[#0D47A1] font-bold capitalize">{reframeMode}</span>
+          <span className="text-[#0D47A1] font-bold capitalize">{reframeMode === 'image' ? 'Custom Picture' : reframeMode}</span>
         </div>
         <div className="flex justify-between">
           <span className="text-slate-500">Output Aspect:</span>
@@ -284,6 +322,37 @@ export function PreviewCanvas({
           </span>
         </div>
       </div>
+
+      {/* Pan & Scan Focal Controller */}
+      {reframeMode === 'crop' && (
+        <div className="pt-2 border-t border-[#90CAF9]/40 space-y-1.5">
+          <div className="flex items-center justify-between text-[11px]">
+            <span className="font-bold text-slate-700 flex items-center gap-1">
+              <MoveHorizontal className="w-3 h-3 text-[#2196F3]" />
+              Pan-and-Scan Framing:
+            </span>
+            <span className="font-mono text-[#0D47A1] font-bold text-xs">
+              {focalPointCoords?.x ?? 50}%
+            </span>
+          </div>
+          <input
+            type="range"
+            min="0"
+            max="100"
+            value={focalPointCoords?.x ?? 50}
+            onChange={(e) => {
+              const val = Number(e.target.value);
+              onFocalPointCoordsChange?.({ x: val, y: focalPointCoords?.y ?? 50 });
+            }}
+            className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-[#2196F3]"
+          />
+          <div className="flex justify-between text-[9px] text-slate-600 font-semibold uppercase">
+            <span>Left Widescreen</span>
+            <span>Center (50%)</span>
+            <span>Right Widescreen</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

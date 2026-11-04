@@ -44,16 +44,30 @@ export async function GET(req: NextRequest) {
     const sanitizedCode = code.replace(/#_.*$/, '').replace(/#.*$/, '').trim();
     const accounts = await facebookService.handleOAuthCallback(sanitizedCode);
 
-    const firstPageName = accounts[0]?.pageName || 'Page';
+    if (accounts.length === 0) {
+      logger.system(
+        'warn',
+        'FACEBOOK_OAUTH_NO_PAGES',
+        'Facebook login succeeded, but /me/accounts returned 0 managed pages.'
+      );
+      return createRedirect(
+        new URL(
+          '/?tab=facebook-composer&facebookWarning=no_pages_found',
+          req.url
+        )
+      );
+    }
+
+    const names = accounts.map((a) => a.pageName).filter(Boolean).join(', ') || accounts[0]?.pageName || 'Page';
     logger.system(
       'info',
       'FACEBOOK_OAUTH_SUCCESS',
-      `Successfully connected ${accounts.length} Facebook Page(s) via OAuth: ${firstPageName}`
+      `Successfully connected ${accounts.length} Facebook Page(s) via OAuth: ${names}`
     );
 
     return createRedirect(
       new URL(
-        `/?tab=facebook-composer&facebookConnected=true&pageName=${encodeURIComponent(firstPageName)}`,
+        `/?tab=facebook-composer&facebookConnected=true&pageName=${encodeURIComponent(names)}&count=${accounts.length}`,
         req.url
       )
     );

@@ -1,8 +1,13 @@
 import fs from 'fs';
 import path from 'path';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import { Part } from '../../models/Part';
 import { config } from '../config';
 import { logger } from '../logger/logger';
+import { probeService } from './probeService';
+
+const execFileAsync = promisify(execFile);
 
 export class PublicMediaService {
   /**
@@ -46,16 +51,29 @@ export class PublicMediaService {
 
     // 4. Check by filename in config.uploadsDir
     if (filename) {
-      const candidate = path.join(config.uploadsDir, filename);
+      const cleanName = path.basename(filename);
+      const candidate = path.join(config.uploadsDir, cleanName);
       if (fs.existsSync(candidate)) return candidate;
 
       if (fs.existsSync(config.uploadsDir)) {
         try {
           const files = fs.readdirSync(config.uploadsDir);
-          const match = files.find(
-            (f) => f.includes(filename) || filename.includes(f)
+          const matches = files.filter(
+            (f) => f === cleanName || f.endsWith(`_${cleanName}`) || f.includes(cleanName)
           );
-          if (match) return path.join(config.uploadsDir, match);
+          if (matches.length > 0) {
+            // Sort by file modification time descending to select newest upload
+            matches.sort((a, b) => {
+              try {
+                const statA = fs.statSync(path.join(config.uploadsDir, a));
+                const statB = fs.statSync(path.join(config.uploadsDir, b));
+                return statB.mtimeMs - statA.mtimeMs;
+              } catch {
+                return 0;
+              }
+            });
+            return path.join(config.uploadsDir, matches[0]);
+          }
         } catch {
           // ignore
         }
@@ -84,6 +102,89 @@ export class PublicMediaService {
   }
 
   /**
+   * Automatically inspects and optimizes video files for Meta Instagram Reels, Threads, and Facebook.
+   * Transcodes non-H.264 (e.g. HEVC/AV1), downsizes 4K UHD to 1080p, compresses excessive bitrates,
+   * and guarantees the FastStart (+faststart) moov atom is placed at the beginning for instant crawler ingestion.
+   */
+  public async ensureCompliantVideo(filePath: string): Promise<string> {
+    if (!fs.existsSync(filePath)) return filePath;
+    const ext = path.extname(filePath).toLowerCase();
+    const stat = fs.statSync(filePath);
+
+    let probe: any = null;
+    try {
+      probe = await probeService.probeVideo(filePath);
+    } catch {
+      return filePath;
+    }
+
+    const videoStream = probe.streams?.find((s: any) => s.codec_type === 'video');
+    const codec = (videoStream?.codec_name || '').toLowerCase();
+    const width = videoStream?.width || 0;
+    const height = videoStream?.height || 0;
+    const isHevcOrNonH264 = codec !== 'h264';
+    const is4KOrOver1080p = width > 1080 || height > 1920;
+    const isOversized = stat.size > 25 * 1024 * 1024; // > 25MB
+
+    // If already compliant (H.264, <= 1080p, <= 25MB), use directly
+    if (!isHevcOrNonH264 && !is4KOrOver1080p && !isOversized && ext === '.mp4') {
+      return filePath;
+    }
+
+    const cleanBase = path.basename(filePath, ext).replace(/^optimized_/, '');
+    const optimizedFilename = `optimized_${cleanBase}.mp4`;
+    const outputPath = path.join(config.uploadsDir, optimizedFilename);
+
+    // If optimized version already exists and has size, reuse it
+    if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 100000) {
+      logger.system(
+        'info',
+        'PUBLIC_MEDIA_OPTIMIZE_CACHE_HIT',
+        `Reusing existing optimized video: ${optimizedFilename}`
+      );
+      return outputPath;
+    }
+
+    logger.system(
+      'info',
+      'PUBLIC_MEDIA_OPTIMIZE_START',
+      `Optimizing video (${codec}, ${width}x${height}, ${(stat.size / (1024 * 1024)).toFixed(1)} MB) for Meta Reels standards...`
+    );
+
+    try {
+      const ffmpegArgs = [
+        '-y',
+        '-i', filePath,
+        '-vf', "scale='min(1080,iw)':-2",
+        '-c:v', 'libx264',
+        '-preset', 'fast',
+        '-crf', '24',
+        '-maxrate', '5M',
+        '-bufsize', '8M',
+        '-c:a', 'aac',
+        '-b:a', '128k',
+        '-movflags', '+faststart',
+        outputPath,
+      ];
+
+      await execFileAsync(config.ffmpegPath, ffmpegArgs, { timeout: 180000 });
+      if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) {
+        const newSizeMb = (fs.statSync(outputPath).size / (1024 * 1024)).toFixed(1);
+        logger.system(
+          'info',
+          'PUBLIC_MEDIA_OPTIMIZE_SUCCESS',
+          `Successfully optimized video to ${optimizedFilename} (${newSizeMb} MB, H.264, FastStart).`
+        );
+        return outputPath;
+      }
+    } catch (optErr) {
+      logger.system('warn', 'PUBLIC_MEDIA_OPTIMIZE_FAILED', `Optimization failed: ${optErr}, using original file.`);
+    }
+
+    return filePath;
+  }
+
+  /**
    * Ensures that Meta API (Instagram / Threads) receives a publicly reachable HTTPS video URL.
    * Priority:
    * 1. Already public HTTPS URL
@@ -96,6 +197,11 @@ export class PublicMediaService {
   public async ensurePublicVideoUrl(mediaUrl: string, localFilePath: string | null): Promise<string> {
     const rawUrl = mediaUrl.trim();
 
+    // If no mediaUrl and no localFilePath
+    if (!rawUrl && !localFilePath) {
+      throw new Error('A video file or URL is required to publish.');
+    }
+
     // 1. If already a valid public HTTPS URL (not localhost / 127.0.0.1)
     if (
       rawUrl.startsWith('https://') &&
@@ -103,6 +209,16 @@ export class PublicMediaService {
       !rawUrl.includes('127.0.0.1')
     ) {
       return rawUrl;
+    }
+
+    // Resolve and optimize local video if present
+    let effectiveFilePath = localFilePath;
+    if (effectiveFilePath && fs.existsSync(effectiveFilePath)) {
+      try {
+        effectiveFilePath = await this.ensureCompliantVideo(effectiveFilePath);
+      } catch (optErr) {
+        logger.system('warn', 'PUBLIC_MEDIA_OPTIMIZE_WARN', `Pre-flight optimization skipped: ${optErr}`);
+      }
     }
 
     // 2. Check configured PUBLIC_URL in config / process.env
@@ -123,8 +239,8 @@ export class PublicMediaService {
         const streamPath = rawUrl.substring(rawUrl.indexOf('/api/download/'));
         return `${publicBase}${streamPath}`;
       }
-      if (localFilePath) {
-        const filename = path.basename(localFilePath);
+      if (effectiveFilePath) {
+        const filename = path.basename(effectiveFilePath);
         return `${publicBase}/api/video/${filename}`;
       }
     }
@@ -150,8 +266,8 @@ export class PublicMediaService {
             const streamPath = rawUrl.substring(rawUrl.indexOf('/api/download/'));
             return `${publicBase}${streamPath}`;
           }
-          if (localFilePath) {
-            const filename = path.basename(localFilePath);
+          if (effectiveFilePath) {
+            const filename = path.basename(effectiveFilePath);
             return `${publicBase}/api/video/${filename}`;
           }
         }
@@ -161,17 +277,17 @@ export class PublicMediaService {
     }
 
     // If no local file path could be resolved and URL is local, fail gracefully
-    if (!localFilePath || !fs.existsSync(localFilePath)) {
-      if (rawUrl.includes('localhost') || rawUrl.includes('127.0.0.1')) {
+    if (!effectiveFilePath || !fs.existsSync(effectiveFilePath)) {
+      if (!rawUrl || rawUrl.includes('localhost') || rawUrl.includes('127.0.0.1')) {
         throw new Error(
-          'Meta cannot fetch media from localhost. Please run "ngrok http https://localhost:3000" or set PUBLIC_URL in .env.'
+          'Meta cannot fetch media from localhost or an empty URL. Please select a valid video file or run "ngrok http 3000".'
         );
       }
       return rawUrl;
     }
 
-    const filename = path.basename(localFilePath);
-    const fileStats = fs.statSync(localFilePath);
+    const filename = path.basename(effectiveFilePath);
+    const fileStats = fs.statSync(effectiveFilePath);
     const fileSizeMb = (fileStats.size / (1024 * 1024)).toFixed(1);
 
     logger.system(
@@ -180,7 +296,7 @@ export class PublicMediaService {
       `Publishing local file (${fileSizeMb} MB: ${filename}) through public cloud relay for Meta video crawler.`
     );
 
-    const fileBuffer = fs.readFileSync(localFilePath);
+    const fileBuffer = fs.readFileSync(effectiveFilePath);
 
     // 4. Primary Cloud Relay: uguu.se
     try {

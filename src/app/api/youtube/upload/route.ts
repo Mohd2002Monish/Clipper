@@ -22,6 +22,7 @@ export async function POST(req: NextRequest) {
       jobId,
       partIndex,
       partFilename,
+      thumbnailPath,
     } = body;
 
     if (!channelId) {
@@ -54,6 +55,7 @@ export async function POST(req: NextRequest) {
       jobId,
       partIndex,
       partFilename,
+      thumbnailPath,
     });
 
     return NextResponse.json({

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Film,
   Layers,
@@ -49,6 +49,7 @@ import {
   AlignCenter,
   AlignLeft,
   AlignRight,
+  Image as ImageIcon,
 } from 'lucide-react';
 import { UploadZone } from '@/components/UploadZone';
 import { PartsTable } from '@/components/PartsTable';
@@ -64,8 +65,12 @@ import { YouTubeUploadedVideosView } from '@/components/YouTubeUploadedVideosVie
 import { ThreadsPublisherView } from '@/components/ThreadsPublisherView';
 import { InstagramPublisherView } from '@/components/InstagramPublisherView';
 import { FacebookPublisherView } from '@/components/FacebookPublisherView';
-import { WaterfallSyndicationView } from '@/components/WaterfallSyndicationView';
 import { MetaConnectionGuideView } from '@/components/MetaConnectionGuideView';
+import { OmniComposerView } from '@/components/OmniComposerView';
+import { MediaLibraryView, MediaAssetItem } from '@/components/MediaLibraryView';
+import { ClipIngestQueueView } from '@/components/ClipIngestQueueView';
+import { VisualCalendarView } from '@/components/VisualCalendarView';
+import { VaultLeadManagerView } from '@/components/VaultLeadManagerView';
 import { VideoProbeData, IJob } from '@/shared/types';
 import { PartPlan, TextOverlaySettings } from '@/shared/schemas';
 import { CustomSelect } from '@/components/ui/CustomSelect';
@@ -90,6 +95,7 @@ interface HealthData {
 
 export default function HomePage() {
   const [activeTab, setActiveTab] = useState<TabType>('new-job');
+  const [selectedOmniAsset, setSelectedOmniAsset] = useState<MediaAssetItem | null>(null);
   const [health, setHealth] = useState<HealthData | null>(null);
   const [isHealthLoading, setIsHealthLoading] = useState(true);
 
@@ -124,8 +130,16 @@ export default function HomePage() {
   const [showDiagnostics, setShowDiagnostics] = useState<boolean>(false);
   const [showSplitAdvanced, setShowSplitAdvanced] = useState<boolean>(false);
   const [selectedRatio, setSelectedRatio] = useState<'9:16' | '1:1' | '4:5' | '16:9'>('9:16');
-  const [reframeMode, setReframeMode] = useState<'blur' | 'solid' | 'crop'>('blur');
+  const [reframeMode, setReframeMode] = useState<'blur' | 'solid' | 'crop' | 'image'>('blur');
+  const [backgroundImageUrl, setBackgroundImageUrl] = useState<string>('');
+  const [backgroundImagePath, setBackgroundImagePath] = useState<string>('');
+  const [backgroundImageName, setBackgroundImageName] = useState<string>('');
+  const [backgroundBlur, setBackgroundBlur] = useState<number>(0);
+  const [backgroundDim, setBackgroundDim] = useState<number>(0);
+  const [isUploadingBgImage, setIsUploadingBgImage] = useState<boolean>(false);
+  const bgFileInputRef = useRef<HTMLInputElement>(null);
   const [focalPoint, setFocalPoint] = useState<'left' | 'center' | 'right' | 'auto_face'>('auto_face');
+  const [focalPointCoords, setFocalPointCoords] = useState<{ x: number; y: number }>({ x: 50, y: 50 });
   const [resolution, setResolution] = useState<'1080p' | '720p' | 'original'>('1080p');
   const [showSafeZone, setShowSafeZone] = useState<boolean>(true);
 
@@ -215,6 +229,54 @@ export default function HomePage() {
   const [planAdjustments, setPlanAdjustments] = useState<string[]>([]);
   const [planError, setPlanError] = useState<string | null>(null);
 
+  // Worker process on-demand control state
+  const [isWorkerRunning, setIsWorkerRunning] = useState<boolean>(false);
+  const [workerPid, setWorkerPid] = useState<number | null>(null);
+  const [isTogglingWorker, setIsTogglingWorker] = useState<boolean>(false);
+  const [workerNotice, setWorkerNotice] = useState<string | null>(null);
+
+  const fetchWorkerStatus = useCallback(async () => {
+    try {
+      const res = await fetch('/api/worker/control');
+      if (res.ok) {
+        const data = await res.json();
+        setIsWorkerRunning(Boolean(data.isRunning));
+        setWorkerPid(data.pid || null);
+      }
+    } catch {
+      // Ignore offline error
+    }
+  }, []);
+
+  const handleToggleWorker = async (action: 'start' | 'stop') => {
+    try {
+      setIsTogglingWorker(true);
+      const res = await fetch('/api/worker/control', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setIsWorkerRunning(action === 'start');
+        setWorkerPid(data.pid || null);
+        setWorkerNotice(
+          action === 'start'
+            ? `Worker engine started (PID: ${data.pid || 'Active'}). Rendering queue is live.`
+            : 'Worker engine stopped. CPU and battery are now preserved.'
+        );
+      } else {
+        setWorkerNotice(data.error || `Failed to ${action} worker.`);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setWorkerNotice(`Failed to ${action} worker: ${msg}`);
+    } finally {
+      setIsTogglingWorker(false);
+      setTimeout(() => setWorkerNotice(null), 5000);
+    }
+  };
+
   const [isCleaningStorage, setIsCleaningStorage] = useState(false);
   const [storageCleanMessage, setStorageCleanMessage] = useState<string | null>(null);
 
@@ -282,7 +344,10 @@ export default function HomePage() {
           'new-job',
           'queue',
           'history',
-          'waterfall',
+          'media-library',
+          'omni-composer',
+          'calendar',
+          'vault-crm',
           'youtube',
           'uploaded-videos',
           'threads-composer',
@@ -306,12 +371,44 @@ export default function HomePage() {
     }
     fetchHealth();
     fetchActiveJobs();
+    fetchWorkerStatus();
     const interval = setInterval(() => {
       fetchHealth();
       fetchActiveJobs();
+      fetchWorkerStatus();
     }, 15000);
     return () => clearInterval(interval);
-  }, []);
+  }, [fetchWorkerStatus]);
+
+  const handleUploadBgImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploadingBgImage(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch('/api/upload/background-image', {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await res.json();
+      if (data.success && data.imageUrl) {
+        setBackgroundImageUrl(data.imageUrl);
+        setBackgroundImagePath(data.storedPath || '');
+        setBackgroundImageName(file.name);
+        setReframeMode('image');
+      } else {
+        alert(data.error || 'Failed to upload background image');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      alert(msg || 'Error uploading background image');
+    } finally {
+      setIsUploadingBgImage(false);
+      if (bgFileInputRef.current) bgFileInputRef.current.value = '';
+    }
+  };
 
   const formatBytes = (bytes?: number) => {
     if (!bytes) return 'N/A';
@@ -505,7 +602,12 @@ export default function HomePage() {
           resolution,
           reframeMode,
           backgroundColor: '#000000',
+          backgroundImageUrl: reframeMode === 'image' ? backgroundImageUrl : undefined,
+          backgroundImagePath: reframeMode === 'image' ? backgroundImagePath : undefined,
+          backgroundBlur: reframeMode === 'image' ? backgroundBlur : 0,
+          backgroundDim: reframeMode === 'image' ? backgroundDim : 0,
           focalPoint,
+          focalPointCoords,
           filenameTemplate,
           qualityPreset,
           destination,
@@ -544,6 +646,24 @@ export default function HomePage() {
       const data = await res.json();
       setActiveJobId(data.jobId);
       setActiveTab('queue');
+
+      // Auto-start worker if currently idle so rendering begins immediately
+      if (!isWorkerRunning) {
+        fetch('/api/worker/control', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'start' }),
+        })
+          .then((r) => r.json())
+          .then((d) => {
+            if (d.success) {
+              setIsWorkerRunning(true);
+              setWorkerPid(d.pid || null);
+              setWorkerNotice(`Render worker auto-started (PID: ${d.pid || 'Active'}) to process job.`);
+            }
+          })
+          .catch(() => {});
+      }
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       setSubmitError(errorMsg);
@@ -557,6 +677,16 @@ export default function HomePage() {
     if (job.settings?.outputFormat) {
       setSelectedRatio((job.settings.outputFormat.aspectRatio as any) || '9:16');
       setReframeMode((job.settings.outputFormat.reframeMode as any) || 'blur');
+      if (job.settings.outputFormat.backgroundImageUrl) {
+        setBackgroundImageUrl(job.settings.outputFormat.backgroundImageUrl);
+        setBackgroundImagePath(job.settings.outputFormat.backgroundImagePath || '');
+      }
+      if (typeof job.settings.outputFormat.backgroundBlur === 'number') {
+        setBackgroundBlur(job.settings.outputFormat.backgroundBlur);
+      }
+      if (typeof job.settings.outputFormat.backgroundDim === 'number') {
+        setBackgroundDim(job.settings.outputFormat.backgroundDim);
+      }
       setFocalPoint((job.settings.outputFormat.focalPoint as any) || 'auto_face');
       setQualityPreset(job.settings.outputFormat.qualityPreset || 'balanced');
       setFilenameTemplate(job.settings.outputFormat.filenameTemplate || '{title}_part{nn}');
@@ -642,30 +772,74 @@ export default function HomePage() {
 
 
 
-        {/* Health status pill */}
-        <div className="flex items-center gap-2 bg-white px-3.5 py-1.5 rounded-xl border border-[#90CAF9]/60 text-xs shadow-sm">
-          <span className="relative flex h-2 w-2">
-            <span
-              className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
-                health?.status === 'healthy' ? 'bg-emerald-400' : 'bg-amber-400'
+        {/* Header Right Actions */}
+        <div className="flex flex-wrap items-center gap-2.5">
+          {/* Worker Engine Control Button & Status */}
+          <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-[#90CAF9]/60 shadow-xs text-xs">
+            <span className="relative flex h-2 w-2">
+              <span
+                className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
+                  isWorkerRunning ? 'bg-emerald-400' : 'bg-slate-300'
+                }`}
+              />
+              <span
+                className={`relative inline-flex rounded-full h-2 w-2 ${
+                  isWorkerRunning ? 'bg-emerald-500' : 'bg-slate-400'
+                }`}
+              />
+            </span>
+            <span className="font-semibold text-slate-700">
+              Worker:{' '}
+              <span className={isWorkerRunning ? 'text-emerald-700 font-bold' : 'text-slate-500'}>
+                {isWorkerRunning ? `Active${workerPid ? ` (#${workerPid})` : ''}` : 'Idle (CPU Saved)'}
+              </span>
+            </span>
+            <button
+              onClick={() => handleToggleWorker(isWorkerRunning ? 'stop' : 'start')}
+              disabled={isTogglingWorker}
+              className={`btn-pressable flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold transition-all disabled:opacity-50 ml-1 ${
+                isWorkerRunning
+                  ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200'
+                  : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 shadow-xs'
               }`}
-            />
-            <span
-              className={`relative inline-flex rounded-full h-2 w-2 ${
-                health?.status === 'healthy' ? 'bg-emerald-500' : 'bg-amber-500'
-              }`}
-            />
-          </span>
-          <span className="text-slate-700 font-semibold capitalize">
-            {health?.status || (isHealthLoading ? 'Checking...' : 'Offline')}
-          </span>
-          <button
-            onClick={fetchHealth}
-            title="Refresh System Health"
-            className="text-slate-400 hover:text-[#0D47A1] transition-colors ml-1"
-          >
-            <RotateCw className="w-3 h-3" />
-          </button>
+              title={isWorkerRunning ? 'Stop rendering worker to save CPU and battery' : 'Start rendering worker to process video jobs'}
+            >
+              {isTogglingWorker ? (
+                <RotateCw className="w-3 h-3 animate-spin" />
+              ) : isWorkerRunning ? (
+                <Square className="w-3 h-3 fill-rose-600 text-rose-600" />
+              ) : (
+                <Play className="w-3 h-3 fill-emerald-600 text-emerald-600" />
+              )}
+              <span>{isTogglingWorker ? 'Updating...' : isWorkerRunning ? 'Stop Worker' : 'Start Worker'}</span>
+            </button>
+          </div>
+
+          {/* Health status pill */}
+          <div className="flex items-center gap-2 bg-white px-3.5 py-1.5 rounded-xl border border-[#90CAF9]/60 text-xs shadow-sm">
+            <span className="relative flex h-2 w-2">
+              <span
+                className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
+                  health?.status === 'healthy' ? 'bg-emerald-400' : 'bg-amber-400'
+                }`}
+              />
+              <span
+                className={`relative inline-flex rounded-full h-2 w-2 ${
+                  health?.status === 'healthy' ? 'bg-emerald-500' : 'bg-amber-500'
+                }`}
+              />
+            </span>
+            <span className="text-slate-700 font-semibold capitalize">
+              {health?.status || (isHealthLoading ? 'Checking...' : 'Offline')}
+            </span>
+            <button
+              onClick={fetchHealth}
+              title="Refresh System Health"
+              className="text-slate-400 hover:text-[#0D47A1] transition-colors ml-1"
+            >
+              <RotateCw className="w-3 h-3" />
+            </button>
+          </div>
         </div>
       </header>
 
@@ -693,6 +867,10 @@ export default function HomePage() {
           <span className="text-slate-300 hidden sm:inline">&bull;</span>
 
           <div className="hidden sm:flex items-center gap-4 text-xs text-slate-600 font-medium">
+            <span className="flex items-center gap-1.5">
+              <Activity className={`w-3.5 h-3.5 ${isWorkerRunning ? 'text-emerald-600' : 'text-slate-400'}`} />
+              Worker {isWorkerRunning ? 'Active' : 'Idle'}
+            </span>
             <span className="flex items-center gap-1.5">
               <Cpu className="w-3.5 h-3.5 text-[#2196F3]" />
               FFmpeg {health?.services.ffmpeg.available ? 'Ready' : 'Offline'}
@@ -800,6 +978,19 @@ export default function HomePage() {
             <Info className="w-4 h-4 text-slate-400" />
           </div>
         </section>
+      )}
+
+      {/* Worker Status Notification Banner */}
+      {workerNotice && (
+        <div className="flex items-center justify-between p-3.5 mb-4 rounded-xl bg-blue-50 border border-blue-200 text-blue-900 text-xs font-semibold shadow-xs animate-in fade-in duration-150">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 shrink-0 text-blue-600" />
+            <span>{workerNotice}</span>
+          </div>
+          <button onClick={() => setWorkerNotice(null)} className="text-blue-700 hover:text-blue-900">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
       )}
 
       {/* Storage Clean Notification Banner */}
@@ -974,21 +1165,30 @@ export default function HomePage() {
                       )}
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                       {[
                         {
                           id: 'blur',
-                          title: 'Blurred Background (Recommended)',
-                          desc: 'Full video centered over a stylized, softly blurred ambient copy of your video.',
+                          title: 'Blurred Ambient',
+                          badge: 'Recommended',
+                          desc: 'Full video centered over a softly blurred ambient copy of your video.',
+                        },
+                        {
+                          id: 'image',
+                          title: 'Custom Picture BG',
+                          badge: 'New',
+                          desc: 'Upload an image to pad both sides (top/bottom or left/right bars) behind your video.',
                         },
                         {
                           id: 'solid',
-                          title: 'Solid Black Bars (Letterbox)',
-                          desc: 'Full video centered with clean solid black padding bars.',
+                          title: 'Solid Letterbox',
+                          badge: 'Classic',
+                          desc: 'Full video centered with clean solid black padding bars on both sides.',
                         },
                         {
                           id: 'crop',
-                          title: 'Zoom to Fill (Smart Crop)',
+                          title: 'Zoom to Fill',
+                          badge: 'Smart Crop',
                           desc: 'Fills viewport completely. Sides or top are cropped with speaker tracking.',
                         },
                       ].map((mode) => (
@@ -996,7 +1196,7 @@ export default function HomePage() {
                           key={mode.id}
                           disabled={doesSourceMatchTarget()}
                           onClick={() => setReframeMode(mode.id as any)}
-                          className={`p-4 rounded-xl border text-left transition-all btn-pressable ${
+                          className={`p-3.5 rounded-xl border text-left transition-all btn-pressable flex flex-col justify-between ${
                             doesSourceMatchTarget()
                               ? 'opacity-40 cursor-not-allowed bg-slate-50 border-slate-200 text-slate-400'
                               : reframeMode === mode.id
@@ -1004,11 +1204,159 @@ export default function HomePage() {
                               : 'bg-white border-[#90CAF9]/60 text-slate-700 hover:border-[#2196F3] hover:bg-[#F0F7FF]'
                           }`}
                         >
-                          <p className="text-xs font-bold text-[#0D47A1] mb-1">{mode.title}</p>
-                          <p className="text-[11px] text-slate-600 leading-relaxed font-medium">{mode.desc}</p>
+                          <div>
+                            <div className="flex items-center justify-between mb-1">
+                              <p className="text-xs font-bold text-[#0D47A1]">{mode.title}</p>
+                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">
+                                {mode.badge}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-slate-600 leading-relaxed font-medium">{mode.desc}</p>
+                          </div>
                         </button>
                       ))}
                     </div>
+
+                    {/* Custom Background Picture Controller (When Image mode is active) */}
+                    {reframeMode === 'image' && (
+                      <div className="mt-4 p-4 rounded-xl bg-[#F0F7FF] border border-[#90CAF9]/80 flex flex-col gap-4">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <ImageIcon className="w-4 h-4 text-[#2196F3]" />
+                            <h5 className="text-xs font-bold text-[#0D47A1]">Custom Background Picture</h5>
+                          </div>
+                          <span className="text-[10px] font-semibold text-blue-700 bg-blue-100 px-2 py-0.5 rounded border border-blue-200">
+                            Aspect Ratio Padding
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-600">
+                          Upload any custom picture (branding banner, cinematic wallpaper, or custom artwork) to fill both padding sides.
+                        </p>
+
+                        <input
+                          ref={bgFileInputRef}
+                          type="file"
+                          accept="image/png,image/jpeg,image/webp,image/jpg"
+                          className="hidden"
+                          onChange={handleUploadBgImage}
+                        />
+
+                        {backgroundImageUrl ? (
+                          <div className="p-3 bg-white rounded-xl border border-blue-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+                            <div className="flex items-center gap-3 min-w-0">
+                              <div className="w-14 h-14 rounded-lg overflow-hidden border border-slate-200 shrink-0 bg-slate-100 relative">
+                                <img
+                                  src={backgroundImageUrl}
+                                  alt="Background preview"
+                                  className="w-full h-full object-cover"
+                                />
+                              </div>
+                              <div className="min-w-0">
+                                <p className="text-xs font-bold text-slate-800 truncate">
+                                  {backgroundImageName || 'Custom Background Picture'}
+                                </p>
+                                <p className="text-[10px] text-emerald-600 font-semibold flex items-center gap-1 mt-0.5">
+                                  <Check className="w-3 h-3" /> Ready for live rendering &amp; splits
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-2 shrink-0">
+                              <button
+                                type="button"
+                                disabled={isUploadingBgImage}
+                                onClick={() => bgFileInputRef.current?.click()}
+                                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 transition-colors"
+                              >
+                                Replace Picture
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setBackgroundImageUrl('');
+                                  setBackgroundImagePath('');
+                                  setBackgroundImageName('');
+                                }}
+                                className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-50 transition-colors"
+                                title="Remove background picture"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={isUploadingBgImage}
+                            onClick={() => bgFileInputRef.current?.click()}
+                            className="p-6 rounded-xl border-2 border-dashed border-blue-300 bg-white hover:bg-blue-50/50 hover:border-blue-400 text-center flex flex-col items-center justify-center gap-2 transition-all group"
+                          >
+                            <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center group-hover:scale-105 transition-transform">
+                              <UploadCloud className="w-5 h-5" />
+                            </div>
+                            <div>
+                              <p className="text-xs font-bold text-blue-700">
+                                {isUploadingBgImage ? 'Uploading background...' : 'Click to Upload Background Picture'}
+                              </p>
+                              <p className="text-[10px] text-slate-500 mt-0.5">
+                                Supports PNG, JPG, WEBP (Recommended: 1080x1920 or higher)
+                              </p>
+                            </div>
+                          </button>
+                        )}
+
+                        {/* Background Tuning Sliders */}
+                        {backgroundImageUrl && (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-blue-100">
+                            <div>
+                              <div className="flex justify-between items-center mb-1">
+                                <label className="text-[11px] font-bold text-slate-700">
+                                  Dim / Darken Background
+                                </label>
+                                <span className="text-[10px] font-mono font-bold text-blue-700">
+                                  {backgroundDim}%
+                                </span>
+                              </div>
+                              <input
+                                type="range"
+                                min="0"
+                                max="80"
+                                step="5"
+                                value={backgroundDim}
+                                onChange={(e) => setBackgroundDim(Number(e.target.value))}
+                                className="w-full accent-[#2196F3] cursor-pointer"
+                              />
+                              <p className="text-[9px] text-slate-500 mt-0.5">
+                                Darkens background image so text and foreground video pop cleanly.
+                              </p>
+                            </div>
+
+                            <div>
+                              <div className="flex justify-between items-center mb-1">
+                                <label className="text-[11px] font-bold text-slate-700">
+                                  Soft Background Blur
+                                </label>
+                                <span className="text-[10px] font-mono font-bold text-blue-700">
+                                  {backgroundBlur}px
+                                </span>
+                              </div>
+                              <input
+                                type="range"
+                                min="0"
+                                max="30"
+                                step="2"
+                                value={backgroundBlur}
+                                onChange={(e) => setBackgroundBlur(Number(e.target.value))}
+                                className="w-full accent-[#2196F3] cursor-pointer"
+                              />
+                              <p className="text-[9px] text-slate-500 mt-0.5">
+                                Adds optional smooth frosted glass bokeh to the picture.
+                              </p>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {/* Smart Pan & Scan (Only when Crop mode is active) */}
                     {reframeMode === 'crop' && (
@@ -1758,7 +2106,12 @@ export default function HomePage() {
                 sourceFilename={uploadedVideo?.sanitizedFilename}
                 aspectRatio={selectedRatio}
                 reframeMode={reframeMode}
+                backgroundImageUrl={reframeMode === 'image' ? backgroundImageUrl : undefined}
+                backgroundBlur={reframeMode === 'image' ? backgroundBlur : 0}
+                backgroundDim={reframeMode === 'image' ? backgroundDim : 0}
                 focalPoint={focalPoint}
+                focalPointCoords={focalPointCoords}
+                onFocalPointCoordsChange={setFocalPointCoords}
                 probe={uploadedVideo?.probe}
                 textOverlay={textOverlaySettings}
                 showSafeZone={showSafeZone}
@@ -1805,9 +2158,32 @@ export default function HomePage() {
         </main>
       )}
 
+      {/* Screen 1.5: Mobile Phone Clip Ingestion Hub & Drive Staging */}
+      {activeTab === 'clip-ingest' && <ClipIngestQueueView />}
+
       {/* Screen 2: Job Queue & Active Monitoring */}
       {activeTab === 'queue' && (
         <div className="flex-1 flex flex-col gap-6">
+          {!isWorkerRunning && (
+            <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-xs animate-in fade-in duration-150">
+              <div className="flex items-center gap-2.5">
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                <div>
+                  <span className="font-bold block">Rendering Worker is Idle (CPU Saved)</span>
+                  <span className="text-amber-700">Jobs will remain queued until you start the worker engine.</span>
+                </div>
+              </div>
+              <button
+                onClick={() => handleToggleWorker('start')}
+                disabled={isTogglingWorker}
+                className="btn-pressable self-start sm:self-auto px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold flex items-center gap-1.5 transition-all shadow-xs disabled:opacity-50"
+              >
+                {isTogglingWorker ? <RotateCw className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5 fill-white" />}
+                <span>{isTogglingWorker ? 'Starting...' : 'Start Worker Now'}</span>
+              </button>
+            </div>
+          )}
+
           {activeJobId ? (
             <div className="flex flex-col gap-4">
               <div className="flex items-center justify-between bg-white p-3.5 rounded-xl border border-[#90CAF9]/60 shadow-sm">
@@ -1901,11 +2277,32 @@ export default function HomePage() {
         />
       )}
 
-      {/* Screen 4: Settings & Logs */}
-      {activeTab === 'settings' && <SettingsLogsView />}
+      {/* Screen 3.2: Unified Media Asset Library */}
+      {activeTab === 'media-library' && (
+        <MediaLibraryView
+          onSelectForOmniPost={(asset) => {
+            setSelectedOmniAsset(asset);
+            setActiveTab('omni-composer');
+          }}
+        />
+      )}
 
-      {/* Screen 4.5: Waterfall Syndication & Auto-Reschedule Loop */}
-      {activeTab === 'waterfall' && <WaterfallSyndicationView />}
+      {/* Screen 3.5: Omni-Post Universal Cross-Platform Studio */}
+      {activeTab === 'omni-composer' && (
+        <OmniComposerView
+          initialAsset={selectedOmniAsset}
+          onOpenMediaLibrary={() => setActiveTab('media-library')}
+        />
+      )}
+
+      {/* Screen 3.8: Master Visual Scheduling Calendar (5 Golden Slots) */}
+      {activeTab === 'calendar' && <VisualCalendarView />}
+
+      {/* Screen 3.9: Movie Vault Lead Manager CRM (#VAULT Comments) */}
+      {activeTab === 'vault-crm' && <VaultLeadManagerView />}
+
+      {/* Screen 4: Settings & Diagnostics Hub */}
+      {activeTab === 'settings' && <SettingsLogsView initialSection="general" />}
 
       {/* Screen 5: YouTube Publisher */}
       {activeTab === 'youtube' && <YouTubePublisherView />}
@@ -1919,11 +2316,11 @@ export default function HomePage() {
       {/* Screen 8: Threads Scheduled & Queue */}
       {activeTab === 'threads-posts' && <ThreadsPublisherView initialSubTab="posts" />}
 
-      {/* Screen 9: Threads Analytics & Insights (Replacing Blacktwist) */}
+      {/* Screen 9: Threads Analytics & Insights */}
       {activeTab === 'threads-analytics' && <ThreadsPublisherView initialSubTab="analytics" />}
 
-      {/* Screen 9.5: Threads MCP Server & Antigravity Bridge */}
-      {activeTab === 'threads-mcp' && <ThreadsPublisherView initialSubTab="mcp" />}
+      {/* Screen 9.5: Threads MCP Server & Antigravity Bridge (Embedded in Settings Hub) */}
+      {activeTab === 'threads-mcp' && <SettingsLogsView initialSection="mcp" />}
 
       {/* Screen 10: Instagram Reels Composer & Scheduler */}
       {activeTab === 'instagram-composer' && <InstagramPublisherView initialSubTab="composer" />}
@@ -1943,8 +2340,8 @@ export default function HomePage() {
       {/* Screen 15: Facebook Page Analytics */}
       {activeTab === 'facebook-analytics' && <FacebookPublisherView initialSubTab="analytics" />}
 
-      {/* Screen 16: Meta Account Connection Guide */}
-      {activeTab === 'meta-guide' && <MetaConnectionGuideView />}
+      {/* Screen 16: Meta Account Connection Guide (Embedded in Settings Hub) */}
+      {activeTab === 'meta-guide' && <SettingsLogsView initialSection="meta-guide" />}
       </div>
 
       <NoticeModal

@@ -4,7 +4,8 @@
   "private": true,
   "description": "Video Splitter & Reframer Web Application with BullMQ, FFmpeg, and Google Drive Integration",
   "scripts": {
-    "dev": "node scripts/dev-all.mjs",
+    "dev": "next dev",
+    "dev:all": "node scripts/dev-all.mjs",
     "dev:web": "next dev",
     "build": "next build",
     "start": "next start",

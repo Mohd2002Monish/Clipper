@@ -176,7 +176,17 @@ export class PartRenderer {
       }
     }
 
-    // 4. Build Recipe
+    // 4. Resolve background image path if custom image mode
+    let resolvedBgPath = outputFormat.backgroundImagePath;
+    if (!resolvedBgPath && outputFormat.backgroundImageUrl) {
+      const clean = outputFormat.backgroundImageUrl.replace(/^\/api\/video\//, '');
+      const candidate = path.isAbsolute(clean) ? clean : path.join(config.uploadsDir, clean);
+      if (fs.existsSync(candidate)) {
+        resolvedBgPath = candidate;
+      }
+    }
+
+    // 5. Build Recipe
     const recipe = buildRenderRecipe({
       inputPath: sourceFilePath,
       outputPath: tempOutputPath,
@@ -185,7 +195,11 @@ export class PartRenderer {
       targetDimensions,
       reframeMode: outputFormat.reframeMode,
       backgroundColor: outputFormat.backgroundColor,
+      backgroundImagePath: resolvedBgPath,
+      backgroundBlur: outputFormat.backgroundBlur,
+      backgroundDim: outputFormat.backgroundDim,
       focalPoint: outputFormat.focalPoint,
+      focalPointCoords: outputFormat.focalPointCoords,
       qualityPreset: outputFormat.qualityPreset,
       probe: sourceProbe,
       textOverlay: textRenderConfig,

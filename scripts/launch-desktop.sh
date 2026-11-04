@@ -61,15 +61,10 @@ else
 fi
 
 # 3. Check if Worker is running
-WORKER_RUNNING=0
 if pgrep -f "src/worker/index.ts" >/dev/null 2>&1; then
-  WORKER_RUNNING=1
-  echo "[VideoTimmer] Rendering worker is already active."
+  echo "[VideoTimmer] Rendering worker is currently active."
 else
-  echo "[VideoTimmer] Starting background rendering worker..."
-  npm run worker > logs/worker.log 2>&1 &
-  WORKER_PID=$!
-  echo "WORKER_PID=$WORKER_PID" >> "$PID_FILE"
+  echo "[VideoTimmer] Rendering worker is idle (can be started on-demand from the app header to save CPU)."
 fi
 
 # 4. Wait for web server to become ready (up to 15 seconds)

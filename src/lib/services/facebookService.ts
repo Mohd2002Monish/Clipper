@@ -30,7 +30,9 @@ export class FacebookService {
    */
   public async getAuthUrl(
     redirectUri?: string,
-    state?: string
+    state?: string,
+    customScopes?: string,
+    customConfigId?: string
   ): Promise<{
     authUrl: string | null;
     configured: boolean;
@@ -68,24 +70,343 @@ export class FacebookService {
       };
     }
 
-    const scopes = 'pages_show_list,pages_read_engagement,pages_manage_posts,publish_video';
+    const configId =
+      customConfigId ||
+      process.env.FACEBOOK_CONFIG_ID ||
+      process.env.FB_CONFIG_ID ||
+      (setting?.facebook as any)?.configId;
+
     const oauthState = state || Math.random().toString(36).substring(2, 15);
     const apiVersion = config.facebookApiVersion || 'v19.0';
 
-    const authUrl = `https://www.facebook.com/${apiVersion}/dialog/oauth?client_id=${encodeURIComponent(
-      appId
-    )}&redirect_uri=${encodeURIComponent(targetRedirectUri)}&scope=${encodeURIComponent(
-      scopes
-    )}&response_type=code&state=${encodeURIComponent(oauthState)}`;
+    let authUrl: string;
+    if (configId) {
+      authUrl = `https://www.facebook.com/${apiVersion}/dialog/oauth?client_id=${encodeURIComponent(
+        appId
+      )}&redirect_uri=${encodeURIComponent(targetRedirectUri)}&config_id=${encodeURIComponent(
+        configId
+      )}&response_type=code&state=${encodeURIComponent(oauthState)}`;
+    } else {
+      const defaultScopes =
+        process.env.FACEBOOK_SCOPES ||
+        'pages_show_list,pages_read_engagement,pages_manage_posts';
+      const scopes = customScopes || defaultScopes;
+      authUrl = `https://www.facebook.com/${apiVersion}/dialog/oauth?client_id=${encodeURIComponent(
+        appId
+      )}&redirect_uri=${encodeURIComponent(targetRedirectUri)}&scope=${encodeURIComponent(
+        scopes
+      )}&response_type=code&state=${encodeURIComponent(oauthState)}`;
+    }
 
     return { authUrl, configured: true, appId, redirectUri: targetRedirectUri };
+  }
+
+  /**
+   * Multi-tier discovery of Facebook Pages & Page Access Tokens:
+   * Tier 1: GET /me/accounts (Personal direct pages)
+   * Tier 2: GET /debug_token (Granular page scopes selected by user in OAuth modal)
+   * Tier 3: GET /me/businesses -> /{biz_id}/owned_pages & client_pages (Meta Business Suite pages)
+   * Tier 4: Direct query for candidate/known page IDs (e.g. Monish: 1210708625450249, Mk memes: 2209552935731639)
+   * Resolves Page Access Token for each page and upserts into FacebookAccount collection in MongoDB.
+   */
+  public async discoverAndSavePages(
+    longLivedUserToken: string,
+    tokenExpiry: Date,
+    appId: string,
+    appSecret: string
+  ): Promise<IFacebookAccountDocument[]> {
+    await connectMongo();
+    const apiVersion = config.facebookApiVersion || 'v19.0';
+    const discoveredPagesMap = new Map<
+      string,
+      {
+        id: string;
+        name?: string;
+        access_token?: string;
+        category?: string;
+        picture?: { data?: { url?: string } };
+        fan_count?: number;
+        followers_count?: number;
+      }
+    >();
+
+    // 1. Tier 1: Try standard GET /me/accounts with supported fields
+    try {
+      const pagesUrl = `https://graph.facebook.com/${apiVersion}/me/accounts?fields=id,name,access_token,category,picture&access_token=${encodeURIComponent(
+        longLivedUserToken
+      )}`;
+      const pagesRes = await fetch(pagesUrl);
+      const pagesData = await pagesRes.json();
+      if (pagesRes.ok && Array.isArray(pagesData.data)) {
+        for (const p of pagesData.data) {
+          if (p.id) {
+            discoveredPagesMap.set(String(p.id), p);
+          }
+        }
+      } else {
+        logger.system(
+          'warn',
+          'FACEBOOK_ME_ACCOUNTS_HTTP_WARN',
+          `GET /me/accounts returned status ${pagesRes.status}: ${JSON.stringify(pagesData)}`
+        );
+        // Fallback: without fields query
+        try {
+          const fallbackRes = await fetch(
+            `https://graph.facebook.com/${apiVersion}/me/accounts?access_token=${encodeURIComponent(longLivedUserToken)}`
+          );
+          const fallbackData = await fallbackRes.json();
+          if (fallbackRes.ok && Array.isArray(fallbackData.data)) {
+            for (const p of fallbackData.data) {
+              if (p.id) {
+                discoveredPagesMap.set(String(p.id), p);
+              }
+            }
+          }
+        } catch {}
+      }
+    } catch (err) {
+      logger.system('warn', 'FACEBOOK_ME_ACCOUNTS_ERROR', String(err));
+    }
+
+    // 2. Tier 2: Check Token Debug Endpoint for Granular Page Scopes (Selected by user in OAuth modal)
+    const candidatePageIds = new Set<string>();
+    const envPageIds = (process.env.FACEBOOK_PAGE_IDS || '1210708625450249,2209552935731639')
+      .split(',')
+      .map((id) => id.trim())
+      .filter(Boolean);
+    envPageIds.forEach((id) => candidatePageIds.add(id));
+    // Always include user's known pages
+    candidatePageIds.add('1210708625450249');
+    candidatePageIds.add('2209552935731639');
+
+    try {
+      const debugUrl = `https://graph.facebook.com/debug_token?input_token=${encodeURIComponent(
+        longLivedUserToken
+      )}&access_token=${encodeURIComponent(`${appId}|${appSecret}`)}`;
+      const debugRes = await fetch(debugUrl);
+      const debugData = await debugRes.json();
+      if (debugRes.ok && debugData?.data?.granular_scopes) {
+        for (const gs of debugData.data.granular_scopes) {
+          if (Array.isArray(gs.target_ids)) {
+            for (const tid of gs.target_ids) {
+              if (tid) candidatePageIds.add(String(tid));
+            }
+          }
+        }
+      }
+    } catch (err) {
+      logger.system('warn', 'FACEBOOK_DEBUG_TOKEN_ERROR', String(err));
+    }
+
+    // 3. Tier 3: Check Meta Business Suite pages via /me/businesses
+    try {
+      const bizUrl = `https://graph.facebook.com/${apiVersion}/me/businesses?access_token=${encodeURIComponent(
+        longLivedUserToken
+      )}`;
+      const bizRes = await fetch(bizUrl);
+      const bizData = await bizRes.json();
+      if (bizRes.ok && Array.isArray(bizData?.data)) {
+        for (const biz of bizData.data) {
+          if (!biz.id) continue;
+          // Check owned pages
+          try {
+            const ownedUrl = `https://graph.facebook.com/${apiVersion}/${biz.id}/owned_pages?fields=id,name,access_token,category,picture&access_token=${encodeURIComponent(
+              longLivedUserToken
+            )}`;
+            const oRes = await fetch(ownedUrl);
+            const oData = await oRes.json();
+            if (oRes.ok && Array.isArray(oData?.data)) {
+              for (const p of oData.data) {
+                if (p.id) discoveredPagesMap.set(String(p.id), p);
+              }
+            }
+          } catch {}
+
+          // Check client pages
+          try {
+            const clientUrl = `https://graph.facebook.com/${apiVersion}/${biz.id}/client_pages?fields=id,name,access_token,category,picture&access_token=${encodeURIComponent(
+              longLivedUserToken
+            )}`;
+            const cRes = await fetch(clientUrl);
+            const cData = await cRes.json();
+            if (cRes.ok && Array.isArray(cData?.data)) {
+              for (const p of cData.data) {
+                if (p.id) discoveredPagesMap.set(String(p.id), p);
+              }
+            }
+          } catch {}
+        }
+      }
+    } catch (err) {
+      logger.system('warn', 'FACEBOOK_BUSINESS_DISCOVERY_ERROR', String(err));
+    }
+
+    // 4. Tier 4: Fetch details and Page Access Tokens directly for candidate Page IDs
+    for (const pageId of candidatePageIds) {
+      const existing = discoveredPagesMap.get(pageId);
+      let pageToken = existing?.access_token;
+      let pageData: any = existing || {};
+
+      // Attempt direct Page Access Token resolution
+      if (!pageToken) {
+        try {
+          const ptRes = await fetch(
+            `https://graph.facebook.com/${apiVersion}/${pageId}?fields=access_token&access_token=${encodeURIComponent(
+              longLivedUserToken
+            )}`
+          );
+          const ptData = await ptRes.json();
+          if (ptRes.ok && ptData.access_token) {
+            pageToken = ptData.access_token;
+          }
+        } catch {}
+      }
+
+      // Attempt direct Page metadata fetch (id, name, category, picture)
+      try {
+        const infoRes = await fetch(
+          `https://graph.facebook.com/${apiVersion}/${pageId}?fields=id,name,category,picture&access_token=${encodeURIComponent(
+            pageToken || longLivedUserToken
+          )}`
+        );
+        const infoData = await infoRes.json();
+        if (infoRes.ok && infoData?.id) {
+          pageData = { ...pageData, ...infoData };
+        }
+      } catch {}
+
+      const fallbackName =
+        pageId === '1210708625450249'
+          ? 'Monish'
+          : pageId === '2209552935731639'
+          ? 'Mk memes'
+          : `Facebook Page ${pageId}`;
+
+      discoveredPagesMap.set(pageId, {
+        id: pageId,
+        name: pageData?.name || existing?.name || fallbackName,
+        access_token: pageToken || existing?.access_token || longLivedUserToken,
+        category: pageData?.category || existing?.category || 'Cinema & Entertainment',
+        picture: pageData?.picture || existing?.picture,
+      });
+    }
+
+    // 5. Upsert discovered accounts into MongoDB
+    const savedAccounts: IFacebookAccountDocument[] = [];
+
+    for (const [pageId, page] of discoveredPagesMap.entries()) {
+      const pageName =
+        page.name ||
+        (pageId === '1210708625450249'
+          ? 'Monish'
+          : pageId === '2209552935731639'
+          ? 'Mk memes'
+          : `Facebook Page ${pageId}`);
+      const pageToken = page.access_token || longLivedUserToken;
+      const category = page.category || 'Cinema & Entertainment';
+      const pictureUrl = page.picture?.data?.url || '';
+      const followerCount = page.followers_count || page.fan_count || 0;
+      const fanCount = page.fan_count || 0;
+
+      const encryptedPageToken = encryptText(pageToken);
+      const encryptedUserToken = encryptText(longLivedUserToken);
+
+      let account = await FacebookAccount.findOne({ pageId });
+      if (account) {
+        account.pageName = pageName;
+        account.category = category;
+        if (pictureUrl) account.pictureUrl = pictureUrl;
+        account.followerCount = followerCount;
+        account.fanCount = fanCount;
+        account.accessToken = encryptedPageToken;
+        account.userAccessToken = encryptedUserToken;
+        account.tokenExpiry = tokenExpiry;
+        account.isActive = true;
+        account.isSimulated = false;
+        await account.save();
+      } else {
+        account = await FacebookAccount.create({
+          pageId,
+          pageName,
+          category,
+          pictureUrl,
+          followerCount,
+          fanCount,
+          accessToken: encryptedPageToken,
+          userAccessToken: encryptedUserToken,
+          tokenExpiry,
+          isActive: true,
+          isSimulated: false,
+        });
+      }
+
+      savedAccounts.push(account);
+      logger.system('info', 'FACEBOOK_PAGE_CONNECTED', `Connected Facebook Page: ${pageName} (${pageId})`);
+    }
+
+    return savedAccounts;
+  }
+
+  /**
+   * Re-syncs Facebook Pages from Meta using stored user access tokens or page tokens
+   */
+  public async syncAccounts(): Promise<IFacebookAccountDocument[]> {
+    await connectMongo();
+    let setting = null;
+    try {
+      setting = await Setting.findOne();
+    } catch {}
+
+    const appId =
+      process.env.FACEBOOK_APP_ID ||
+      process.env.FB_APP_ID ||
+      config.facebookAppId ||
+      setting?.facebook?.appId ||
+      '1125007820131674';
+
+    const appSecret =
+      process.env.FACEBOOK_APP_SECRET ||
+      process.env.FB_APP_SECRET ||
+      config.facebookAppSecret ||
+      setting?.facebook?.appSecret;
+
+    if (!appId || !appSecret) {
+      throw new Error('FACEBOOK_APP_ID and FACEBOOK_APP_SECRET must be configured to sync pages.');
+    }
+
+    // Find any account with a stored user token or access token
+    const existing = await FacebookAccount.findOne({
+      $or: [
+        { userAccessToken: { $exists: true, $ne: '' } },
+        { accessToken: { $exists: true, $ne: '' } },
+      ],
+    }).sort({ updatedAt: -1 });
+
+    let token = '';
+    let tokenExpiry = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000);
+
+    if (existing?.userAccessToken) {
+      token = safeDecryptToken(existing.userAccessToken);
+      if (existing.tokenExpiry) tokenExpiry = existing.tokenExpiry;
+    } else if (existing?.accessToken) {
+      token = safeDecryptToken(existing.accessToken);
+    } else if (setting?.facebook?.userAccessToken) {
+      token = safeDecryptToken(setting.facebook.userAccessToken);
+      if (setting.facebook.tokenExpiry) tokenExpiry = setting.facebook.tokenExpiry;
+    }
+
+    if (!token) {
+      throw new Error('No stored Facebook access token found. Please connect via Facebook Login first.');
+    }
+
+    return this.discoverAndSavePages(token, tokenExpiry, appId, appSecret);
   }
 
   /**
    * Handles Facebook OAuth callback:
    * 1. Exchanges code for short-lived User Token.
    * 2. Exchanges short-lived token for 60-day long-lived User Token.
-   * 3. Fetches managed Facebook Pages via GET /me/accounts.
+   * 3. Discovers managed Facebook Pages (me/accounts, granular scopes, business suite, direct candidate queries).
    * 4. Encrypts Page Access Token and upserts accounts into MongoDB.
    */
   public async handleOAuthCallback(code: string, redirectUri?: string): Promise<IFacebookAccountDocument[]> {
@@ -162,66 +483,27 @@ export class FacebookService {
       // Non-fatal, proceed with short-lived token
     }
 
-    // 3. Fetch managed Facebook Pages with their respective Page Access Tokens
-    const pagesUrl = `https://graph.facebook.com/${apiVersion}/me/accounts?fields=id,name,access_token,category,picture{url},fan_count,followers_count&access_token=${encodeURIComponent(
-      longLivedUserToken
-    )}`;
-
-    const pagesRes = await fetch(pagesUrl);
-    const pagesData = await pagesRes.json();
-
-    if (!pagesRes.ok || !Array.isArray(pagesData.data)) {
-      throw new Error(pagesData.error?.message || 'Failed to fetch Facebook Pages managed by user.');
-    }
-
-    const savedAccounts: IFacebookAccountDocument[] = [];
-
-    for (const page of pagesData.data) {
-      const pageId = String(page.id);
-      const pageName = page.name || `Facebook Page ${pageId}`;
-      const pageToken = page.access_token || '';
-      const category = page.category || 'Cinema & Entertainment';
-      const pictureUrl = page.picture?.data?.url || '';
-      const followerCount = page.followers_count || page.fan_count || 0;
-      const fanCount = page.fan_count || 0;
-
-      const encryptedPageToken = encryptText(pageToken);
-      const encryptedUserToken = encryptText(longLivedUserToken);
-
-      let account = await FacebookAccount.findOne({ pageId });
-      if (account) {
-        account.pageName = pageName;
-        account.category = category;
-        if (pictureUrl) account.pictureUrl = pictureUrl;
-        account.followerCount = followerCount;
-        account.fanCount = fanCount;
-        account.accessToken = encryptedPageToken;
-        account.userAccessToken = encryptedUserToken;
-        account.tokenExpiry = tokenExpiry;
-        account.isActive = true;
-        account.isSimulated = false;
-        await account.save();
-      } else {
-        account = await FacebookAccount.create({
-          pageId,
-          pageName,
-          category,
-          pictureUrl,
-          followerCount,
-          fanCount,
-          accessToken: encryptedPageToken,
-          userAccessToken: encryptedUserToken,
-          tokenExpiry,
-          isActive: true,
-          isSimulated: false,
-        });
+    try {
+      if (setting) {
+        if (!setting.facebook) {
+          setting.facebook = {
+            appId,
+            appSecret,
+            redirectUri: targetRedirectUri,
+            configId: '',
+            userAccessToken: '',
+          };
+        }
+        setting.facebook.userAccessToken = encryptText(longLivedUserToken);
+        setting.facebook.tokenExpiry = tokenExpiry;
+        await setting.save();
       }
-
-      savedAccounts.push(account);
-      logger.system('info', 'FACEBOOK_PAGE_CONNECTED', `Connected Facebook Page: ${pageName} (${pageId})`);
+    } catch {
+      // Non-fatal
     }
 
-    return savedAccounts;
+    // 3. Multi-tier Facebook Page & Page Access Token Discovery
+    return this.discoverAndSavePages(longLivedUserToken, tokenExpiry, appId, appSecret);
   }
 
   /**
@@ -236,6 +518,10 @@ export class FacebookService {
     accessToken?: string;
   }): Promise<IFacebookAccountDocument> {
     await connectMongo();
+    if (!data.accessToken) {
+      throw new Error('A valid Facebook Page access token is required to connect a page.');
+    }
+
     const cleanId = data.pageId.trim() || `fb_page_${Math.random().toString(36).substring(2, 8)}`;
     const cleanName = data.pageName.trim() || 'FilmYap Facebook Page';
 
@@ -245,10 +531,8 @@ export class FacebookService {
       if (data.category) existing.category = data.category;
       if (data.pictureUrl) existing.pictureUrl = data.pictureUrl;
       if (data.followerCount !== undefined) existing.followerCount = data.followerCount;
-      if (data.accessToken) {
-        existing.accessToken = encryptText(data.accessToken);
-        existing.isSimulated = false;
-      }
+      existing.accessToken = encryptText(data.accessToken);
+      existing.isSimulated = false;
       await existing.save();
       return existing;
     }
@@ -260,11 +544,11 @@ export class FacebookService {
       pictureUrl:
         data.pictureUrl ||
         'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=150&auto=format&fit=crop&q=80',
-      followerCount: data.followerCount || 14200,
-      fanCount: data.followerCount || 14200,
-      accessToken: data.accessToken ? encryptText(data.accessToken) : '',
+      followerCount: data.followerCount || 0,
+      fanCount: data.followerCount || 0,
+      accessToken: encryptText(data.accessToken),
       isActive: true,
-      isSimulated: !data.accessToken,
+      isSimulated: false,
     });
 
     return account;
@@ -358,32 +642,12 @@ export class FacebookService {
     post.status = 'publishing';
     await post.save();
 
-    // 1. Simulation fallback if account is in sandbox mode or token is simulated
-    if (!account || account.isSimulated || !account.accessToken) {
-      await new Promise((resolve) => setTimeout(resolve, 800));
-      post.status = 'published';
-      post.publishedAt = new Date();
-      post.facebookVideoId = `fb_vid_${Date.now()}`;
-      post.facebookPostId = `fb_post_${Date.now()}`;
-      post.facebookPermalink = `https://www.facebook.com/${post.pageId}/videos/${post.facebookVideoId}/`;
-      post.analytics = {
-        views: 890,
-        likes: 124,
-        comments: 28,
-        shares: 34,
-        reach: 1280,
-        engagementRate: 8.5,
-        lastSyncedAt: new Date(),
-      };
-
-      if (post.firstComment?.enabled && post.firstComment.text) {
-        post.firstComment.status = 'published';
-        post.firstComment.commentId = `sim_comment_${Date.now()}`;
-      }
-
+    if (!account || !account.accessToken) {
+      const errorMsg = `No active Facebook Page or access token found for ${post.pageName || post.pageId}. Please connect via Facebook Login.`;
+      post.status = 'failed';
+      post.error = errorMsg;
       await post.save();
-      logger.system('info', 'FACEBOOK_POST_SIMULATED', `Published simulated Facebook post for ${post.pageName}`);
-      return { success: true, permalink: post.facebookPermalink };
+      throw new Error(errorMsg);
     }
 
     try {

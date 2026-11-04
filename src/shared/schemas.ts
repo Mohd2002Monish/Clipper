@@ -6,7 +6,7 @@ export type AspectRatioPreset = z.infer<typeof AspectRatioPresetSchema>;
 export const ResolutionPresetSchema = z.enum(['1080p', '720p', 'original']);
 export type ResolutionPreset = z.infer<typeof ResolutionPresetSchema>;
 
-export const ReframeModeSchema = z.enum(['blur', 'solid', 'crop']);
+export const ReframeModeSchema = z.enum(['blur', 'solid', 'crop', 'image']);
 export type ReframeMode = z.infer<typeof ReframeModeSchema>;
 
 export const FocalPointSchema = z.enum(['left', 'center', 'right', 'auto_face', 'custom']);
@@ -117,6 +117,10 @@ export const OutputFormatSchema = z.object({
   resolution: ResolutionPresetSchema.default('1080p'),
   reframeMode: ReframeModeSchema.default('blur'),
   backgroundColor: z.string().default('#000000'),
+  backgroundImageUrl: z.string().optional(),
+  backgroundImagePath: z.string().optional(),
+  backgroundBlur: z.number().min(0).max(50).default(0),
+  backgroundDim: z.number().min(0).max(100).default(0),
   focalPoint: FocalPointSchema.default('center'),
   focalPointCoords: z.object({ x: z.number(), y: z.number() }).optional(),
   filenameTemplate: z.string().default('{title}_part{nn}'),

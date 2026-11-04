@@ -352,6 +352,10 @@ export class InstagramService {
     accessToken?: string;
   }): Promise<IInstagramAccountDocument> {
     await connectMongo();
+    if (!data.accessToken) {
+      throw new Error('An active Instagram access token is required to connect an account.');
+    }
+
     const cleanUsername = data.username.replace(/^@/, '').trim();
     const instagramUserId = 'ig_' + cleanUsername + '_' + Math.random().toString(36).substring(2, 7);
 
@@ -360,10 +364,8 @@ export class InstagramService {
       existing.displayName = data.displayName || existing.displayName;
       if (data.biography) existing.biography = data.biography;
       if (data.profilePictureUrl) existing.profilePictureUrl = data.profilePictureUrl;
-      if (data.accessToken) {
-        existing.accessToken = encryptText(data.accessToken);
-        existing.isSimulated = false;
-      }
+      existing.accessToken = encryptText(data.accessToken);
+      existing.isSimulated = false;
       await existing.save();
       return existing;
     }
@@ -376,12 +378,12 @@ export class InstagramService {
         data.profilePictureUrl ||
         'https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=150&auto=format&fit=crop&q=80',
       biography: data.biography || 'Cinema reels, curated trailers & ending analysis',
-      followerCount: data.followerCount || 8500,
-      mediaCount: 48,
-      accessToken: data.accessToken ? encryptText(data.accessToken) : '',
+      followerCount: data.followerCount || 0,
+      mediaCount: 0,
+      accessToken: encryptText(data.accessToken),
       authProvider: 'instagram_login',
       isActive: true,
-      isSimulated: !data.accessToken,
+      isSimulated: false,
     });
 
     return account;
@@ -559,33 +561,12 @@ export class InstagramService {
     post.status = 'publishing';
     await post.save();
 
-    // 1. Simulation fallback if account is in sandbox mode or no valid token
-    if (!account || account.isSimulated || !account.accessToken) {
-      await new Promise((resolve) => setTimeout(resolve, 800));
-      post.status = 'published';
-      post.publishedAt = new Date();
-      post.instagramMediaId = `ig_media_${Date.now()}`;
-      post.instagramPermalink = `https://instagram.com/reel/C${Math.random().toString(36).substring(2, 9)}/`;
-      post.analytics = {
-        plays: 420,
-        views: 380,
-        likes: 64,
-        comments: 12,
-        shares: 8,
-        saves: 14,
-        reach: 520,
-        engagementRate: 7.2,
-        lastSyncedAt: new Date(),
-      };
-
-      if (post.firstComment?.enabled && post.firstComment.text) {
-        post.firstComment.status = 'published';
-        post.firstComment.commentId = `sim_comment_${Date.now()}`;
-      }
-
+    if (!account || !account.accessToken) {
+      const errorMsg = `No active Instagram account or access token found for @${post.username}. Please connect your account via Instagram Login.`;
+      post.status = 'failed';
+      post.error = errorMsg;
       await post.save();
-      logger.system('info', 'INSTAGRAM_POST_SIMULATED', `Published simulated Instagram Reel for @${post.username}`);
-      return { success: true, permalink: post.instagramPermalink };
+      throw new Error(errorMsg);
     }
 
     try {
@@ -603,6 +584,10 @@ export class InstagramService {
       const publicVideoUrl = (post.mediaType === 'REELS' || post.mediaType === 'VIDEO')
         ? await this.ensurePublicVideoUrl(post, localFilePath)
         : post.mediaUrl;
+
+      if ((post.mediaType === 'REELS' || post.mediaType === 'VIDEO') && (!publicVideoUrl || !publicVideoUrl.startsWith('http'))) {
+        throw new Error('A valid public video URL is required to publish an Instagram Reel. Please select or upload a video file.');
+      }
 
       logger.system('info', 'INSTAGRAM_CONTAINER_INIT', `Creating media container with public URL: ${publicVideoUrl}`);
 

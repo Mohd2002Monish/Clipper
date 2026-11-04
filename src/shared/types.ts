@@ -156,6 +156,9 @@ export interface ISystemSetting {
     appId?: string;
     appSecret?: string;
     redirectUri?: string;
+    configId?: string;
+    userAccessToken?: string;
+    tokenExpiry?: Date;
   };
   defaults: {
     reframeMode: string;

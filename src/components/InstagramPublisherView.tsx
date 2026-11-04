@@ -277,7 +277,18 @@ export function InstagramPublisherView({ initialSubTab = 'composer' }: Instagram
   const fetchOAuthStatus = useCallback(async () => {
     try {
       const res = await fetch('/api/instagram/auth');
-      const data = await res.json();
+      let data: any;
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        data = await res.json();
+      } else {
+        const text = await res.text();
+        throw new Error(
+          res.status >= 500
+            ? `Server processing error (${res.status}). Publish request timed out or failed on the server.`
+            : `Server returned non-JSON response: ${text.slice(0, 100)}`
+        );
+      }
       if (data.success) {
         setOauthStatus({
           configured: data.configured,
@@ -305,7 +316,18 @@ export function InstagramPublisherView({ initialSubTab = 'composer' }: Instagram
 
       const url = `/api/instagram/posts${queryParts.length > 0 ? `?${queryParts.join('&')}` : ''}`;
       const res = await fetch(url);
-      const data = await res.json();
+      let data: any;
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        data = await res.json();
+      } else {
+        const text = await res.text();
+        throw new Error(
+          res.status >= 500
+            ? `Server processing error (${res.status}). Publish request timed out or failed on the server.`
+            : `Server returned non-JSON response: ${text.slice(0, 100)}`
+        );
+      }
       if (data.success) {
         setPostsList(data.posts || []);
         if (data.counts) setPostsCounts(data.counts);
@@ -594,7 +616,19 @@ export function InstagramPublisherView({ initialSubTab = 'composer' }: Instagram
         body: JSON.stringify(payload),
       });
 
-      const data = await res.json();
+      let data: any;
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        data = await res.json();
+      } else {
+        const text = await res.text();
+        throw new Error(
+          res.status >= 500
+            ? `Server processing error (${res.status}). The operation timed out or failed on the server. Please check that your video is accessible.`
+            : `Server returned non-JSON response (${res.status}): ${text.slice(0, 100)}`
+        );
+      }
+
       if (!res.ok || !data.success) {
         throw new Error(data.error || 'Failed to submit Instagram post');
       }
@@ -642,7 +676,18 @@ export function InstagramPublisherView({ initialSubTab = 'composer' }: Instagram
   const handlePublishNow = async (postId: string) => {
     try {
       const res = await fetch(`/api/instagram/posts/${postId}/publish`, { method: 'POST' });
-      const data = await res.json();
+      let data: any;
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        data = await res.json();
+      } else {
+        const text = await res.text();
+        throw new Error(
+          res.status >= 500
+            ? `Server processing error (${res.status}). Publish request timed out or failed on the server.`
+            : `Server returned non-JSON response: ${text.slice(0, 100)}`
+        );
+      }
       if (data.success) {
         setNotice({
           isOpen: true,
@@ -668,7 +713,18 @@ export function InstagramPublisherView({ initialSubTab = 'composer' }: Instagram
     if (!confirm('Are you sure you want to delete this Instagram post?')) return;
     try {
       const res = await fetch(`/api/instagram/posts/${postId}`, { method: 'DELETE' });
-      const data = await res.json();
+      let data: any;
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        data = await res.json();
+      } else {
+        const text = await res.text();
+        throw new Error(
+          res.status >= 500
+            ? `Server processing error (${res.status}). Publish request timed out or failed on the server.`
+            : `Server returned non-JSON response: ${text.slice(0, 100)}`
+        );
+      }
       if (data.success) {
         setNotice({ isOpen: true, title: 'Deleted', message: 'Post removed from queue.', type: 'info' });
         fetchPosts();
@@ -691,7 +747,18 @@ export function InstagramPublisherView({ initialSubTab = 'composer' }: Instagram
           status: 'scheduled',
         }),
       });
-      const data = await res.json();
+      let data: any;
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        data = await res.json();
+      } else {
+        const text = await res.text();
+        throw new Error(
+          res.status >= 500
+            ? `Server processing error (${res.status}). Publish request timed out or failed on the server.`
+            : `Server returned non-JSON response: ${text.slice(0, 100)}`
+        );
+      }
       if (data.success) {
         setNotice({
           isOpen: true,
@@ -825,7 +892,18 @@ export function InstagramPublisherView({ initialSubTab = 'composer' }: Instagram
     if (!confirm(`Are you sure you want to disconnect @${username}?`)) return;
     try {
       const res = await fetch(`/api/instagram/accounts/${id}`, { method: 'DELETE' });
-      const data = await res.json();
+      let data: any;
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        data = await res.json();
+      } else {
+        const text = await res.text();
+        throw new Error(
+          res.status >= 500
+            ? `Server processing error (${res.status}). Publish request timed out or failed on the server.`
+            : `Server returned non-JSON response: ${text.slice(0, 100)}`
+        );
+      }
       if (data.success) {
         setNotice({ isOpen: true, title: 'Disconnected', message: `@${username} was removed.`, type: 'info' });
         fetchAccounts();
@@ -852,7 +930,18 @@ export function InstagramPublisherView({ initialSubTab = 'composer' }: Instagram
           redirectUri: oauthRedirectUriInput.trim(),
         }),
       });
-      const data = await res.json();
+      let data: any;
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        data = await res.json();
+      } else {
+        const text = await res.text();
+        throw new Error(
+          res.status >= 500
+            ? `Server processing error (${res.status}). Publish request timed out or failed on the server.`
+            : `Server returned non-JSON response: ${text.slice(0, 100)}`
+        );
+      }
       if (data.success) {
         setNotice({
           isOpen: true,
@@ -900,7 +989,18 @@ export function InstagramPublisherView({ initialSubTab = 'composer' }: Instagram
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'refresh' }),
       });
-      const data = await res.json();
+      let data: any;
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        data = await res.json();
+      } else {
+        const text = await res.text();
+        throw new Error(
+          res.status >= 500
+            ? `Server processing error (${res.status}). Publish request timed out or failed on the server.`
+            : `Server returned non-JSON response: ${text.slice(0, 100)}`
+        );
+      }
       if (data.success) {
         setNotice({
           isOpen: true,
@@ -929,7 +1029,18 @@ export function InstagramPublisherView({ initialSubTab = 'composer' }: Instagram
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'sync' }),
       });
-      const data = await res.json();
+      let data: any;
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        data = await res.json();
+      } else {
+        const text = await res.text();
+        throw new Error(
+          res.status >= 500
+            ? `Server processing error (${res.status}). Publish request timed out or failed on the server.`
+            : `Server returned non-JSON response: ${text.slice(0, 100)}`
+        );
+      }
       if (data.success) {
         setNotice({
           isOpen: true,
@@ -991,14 +1102,8 @@ export function InstagramPublisherView({ initialSubTab = 'composer' }: Instagram
                       {selectedAccount.followerCount?.toLocaleString() || 0} followers
                     </div>
                   </div>
-                  <span
-                    className={`text-[9px] px-1.5 py-0.2 rounded-full font-bold uppercase ${
-                      selectedAccount.isSimulated
-                        ? 'bg-purple-900/60 text-purple-300 border border-purple-700/50'
-                        : 'bg-emerald-950/70 text-emerald-400 border border-emerald-600/40'
-                    }`}
-                  >
-                    {selectedAccount.isSimulated ? 'Sandbox' : 'Instagram Login'}
+                  <span className="text-[9px] px-1.5 py-0.2 rounded-full font-bold uppercase bg-emerald-950/70 text-emerald-400 border border-emerald-600/40">
+                    Instagram Login
                   </span>
                   <ChevronDown className="w-3.5 h-3.5 text-slate-400 group-hover:text-white ml-0.5" />
                 </button>
@@ -1178,14 +1283,8 @@ export function InstagramPublisherView({ initialSubTab = 'composer' }: Instagram
                       <span className="text-xs font-bold text-slate-900 truncate">
                         Publishing as <strong className="text-pink-700 font-extrabold">@{selectedAccount.username}</strong>
                       </span>
-                      <span
-                        className={`text-[9px] px-1.5 py-0.2 rounded-full font-bold uppercase ${
-                          selectedAccount.isSimulated
-                            ? 'bg-purple-100 text-purple-700'
-                            : 'bg-emerald-100 text-emerald-700'
-                        }`}
-                      >
-                        {selectedAccount.isSimulated ? 'Sandbox' : 'Instagram Login'}
+                      <span className="text-[9px] px-1.5 py-0.2 rounded-full font-bold uppercase bg-emerald-100 text-emerald-700">
+                        Instagram Login
                       </span>
                     </div>
                     <div className="text-[11px] text-slate-500 truncate">
@@ -1204,7 +1303,7 @@ export function InstagramPublisherView({ initialSubTab = 'composer' }: Instagram
                     >
                       {accounts.map((acc) => (
                         <option key={acc._id || acc.instagramUserId} value={acc._id || acc.instagramUserId}>
-                          @{acc.username} ({acc.isSimulated ? 'Sandbox' : 'Instagram'})
+                          @{acc.username}
                         </option>
                       ))}
                     </select>
@@ -2405,14 +2504,8 @@ export function InstagramPublisherView({ initialSubTab = 'composer' }: Instagram
                           <div className="truncate">
                             <div className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
                               <span className="truncate">@{acc.username}</span>
-                              <span
-                                className={`text-[9px] px-1.5 py-0.2 rounded-full uppercase font-bold shrink-0 ${
-                                  acc.isSimulated
-                                    ? 'bg-purple-100 text-purple-700'
-                                    : 'bg-emerald-100 text-emerald-700'
-                                }`}
-                              >
-                                {acc.isSimulated ? 'Sandbox' : 'Instagram Login'}
+                              <span className="text-[9px] px-1.5 py-0.2 rounded-full uppercase font-bold shrink-0 bg-emerald-100 text-emerald-700">
+                                Instagram Login
                               </span>
                             </div>
                             <div className="text-[11px] text-slate-400 truncate">
@@ -2453,21 +2546,18 @@ export function InstagramPublisherView({ initialSubTab = 'composer' }: Instagram
                       {/* Token Status & Actions Bar */}
                       <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
                         <div className="flex items-center gap-1.5">
-                          <span className={`h-1.5 w-1.5 rounded-full ${acc.isSimulated ? 'bg-purple-500' : 'bg-emerald-500'}`} />
-                          <span>
-                            {acc.isSimulated ? 'Simulation Mode' : 'Direct Login Active'}
-                          </span>
+                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                          <span>Direct Login Active</span>
                         </div>
 
-                        {!acc.isSimulated && (
-                          <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              disabled={isLoadingAction}
-                              onClick={() => handleSyncAccount(acc._id, acc.username)}
-                              className="text-[11px] font-semibold text-slate-600 hover:text-pink-600 flex items-center gap-1"
-                              title="Sync followers and profile from Meta Graph API"
-                            >
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            disabled={isLoadingAction}
+                            onClick={() => handleSyncAccount(acc._id, acc.username)}
+                            className="text-[11px] font-semibold text-slate-600 hover:text-pink-600 flex items-center gap-1"
+                            title="Sync followers and profile from Meta Graph API"
+                          >
                               <RefreshCw className={`w-3 h-3 ${isLoadingAction ? 'animate-spin' : ''}`} />
                               Sync Profile
                             </button>
@@ -2483,7 +2573,6 @@ export function InstagramPublisherView({ initialSubTab = 'composer' }: Instagram
                               Extend (+60d)
                             </button>
                           </div>
-                        )}
                       </div>
                     </div>
                   );

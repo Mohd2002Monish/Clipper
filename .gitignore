@@ -1,49 +1,79 @@
-# dependencies
-/node_modules
-/.pnp
+# Dependencies (root and all sub-packages/services)
+node_modules/
+**/node_modules/
+.pnp
 .pnp.js
 
-# testing
+# Testing
 /coverage
 /test-results/
 /playwright-report/
 
-# next.js
-/.next/
-/out/
+# Next.js & Web builds
+.next/
+**/.next/
+out/
+**/out/
 
-# production
-/build
-/dist
+# Mobile & Expo
+.expo/
+**/.expo/
+web-build/
+**/web-build/
 
-# misc
+# Production builds
+build/
+**/build/
+dist/
+**/dist/
+
+# Operating System & Editors
 .DS_Store
+**/.DS_Store
+Thumbs.db
 *.pem
+*.orig.*
 
-# debug
+# Logs & Debugging
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+*.log
+logs/*
+!logs/.gitkeep
+.videotimmer.worker.pid
 
-# local env files
-.env*.local
+# Environment Variables
 .env
+.env.local
+.env.*.local
+**/.env
+**/.env.local
+**/.env.*.local
+!**/.env.example
 
-# vercel
+# Vercel
 .vercel
+**/.vercel
 
-# typescript
+# TypeScript Cache
 *.tsbuildinfo
 next-env.d.ts
+**/*.tsbuildinfo
 
-# application storage & logs
+# Application Temporary Storage
 /storage/uploads/*
 !/storage/uploads/.gitkeep
 /storage/work/*
 !/storage/work/.gitkeep
 /storage/outputs/*
 !/storage/outputs/.gitkeep
-/logs/*
-!/logs/.gitkeep
+/storage/temp_ingest/*
+!/storage/temp_ingest/.gitkeep
 
+# Security certificates & keys
 certificates
+*.jks
+*.p8
+*.p12
+*.key

@@ -11,9 +11,10 @@ export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const redirectUri = searchParams.get('redirectUri') || undefined;
+    const scopes = searchParams.get('scopes') || undefined;
 
     const state = crypto.randomBytes(32).toString('hex');
-    const result = await facebookService.getAuthUrl(redirectUri, state);
+    const result = await facebookService.getAuthUrl(redirectUri, state, scopes);
 
     const res = NextResponse.json({
       success: true,

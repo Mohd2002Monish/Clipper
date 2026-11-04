@@ -340,16 +340,11 @@ export class McpToolService {
           targetAccount = await ThreadsAccount.findOne({ isActive: true });
         }
 
-        // If still no account, create a local creator account to preserve data
+        // If still no account, fail with clear instructions
         if (!targetAccount) {
-          targetAccount = await ThreadsAccount.create({
-            userId: 'creator_' + Math.random().toString(36).substring(2, 8),
-            username: cleanProviderId || 'creator',
-            displayName: cleanProviderId || 'Creator Studio',
-            followerCount: 150,
-            isActive: true,
-            isSimulated: true,
-          });
+          throw new Error(
+            'No active Threads account is connected in VideoTimmer. Please connect via Threads OAuth or add an access token in Settings.'
+          );
         }
 
         // Map posts array

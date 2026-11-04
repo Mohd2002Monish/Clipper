@@ -1,0 +1,45 @@
+{
+  "expo": {
+    "name": "Clip Ingest",
+    "slug": "videotimmer",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "scheme": "clipqueue",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0284c7"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.mohd4monish.videotimmer"
+    },
+    "android": {
+      "package": "com.mohd4monish.videotimmer",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0284c7"
+      },
+      "intentFilters": [
+        {
+          "action": "SEND",
+          "category": [
+            "DEFAULT"
+          ],
+          "data": [
+            {
+              "mimeType": "text/plain"
+            }
+          ]
+        }
+      ]
+    },
+    "extra": {
+      "eas": {
+        "projectId": "b0a2a8a8-43a5-4237-a6d5-0642db611990"
+      }
+    }
+  }
+}

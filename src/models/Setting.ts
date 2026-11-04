@@ -30,6 +30,9 @@ const SettingSchema = new Schema<ISettingDocument>(
       appId: { type: String, default: '' },
       appSecret: { type: String, default: '' },
       redirectUri: { type: String, default: 'http://localhost:3000/auth/facebook/callback' },
+      configId: { type: String, default: '' },
+      userAccessToken: { type: String, default: '' },
+      tokenExpiry: { type: Date },
     },
     defaults: {
       reframeMode: { type: String, default: 'blur' },

@@ -21,7 +21,12 @@ export async function POST(req: NextRequest) {
       aspectRatio = '9:16',
       reframeMode = 'blur',
       backgroundColor = '#000000',
+      backgroundImageUrl,
+      backgroundImagePath,
+      backgroundBlur = 0,
+      backgroundDim = 0,
       focalPoint = 'center',
+      focalPointCoords,
       timestamp = 1.0,
     } = body;
 
@@ -71,7 +76,17 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 4. Build render recipe
+    // 4. Resolve custom background image path
+    let resolvedBgPath = backgroundImagePath;
+    if (!resolvedBgPath && backgroundImageUrl) {
+      const clean = backgroundImageUrl.replace(/^\/api\/video\//, '');
+      const candidate = path.isAbsolute(clean) ? clean : path.join(config.uploadsDir, clean);
+      if (fs.existsSync(candidate)) {
+        resolvedBgPath = candidate;
+      }
+    }
+
+    // 5. Build render recipe
     const recipe = buildRenderRecipe({
       inputPath: videoPath,
       outputPath: 'pipe:1',
@@ -80,7 +95,11 @@ export async function POST(req: NextRequest) {
       targetDimensions: fullDimensions,
       reframeMode,
       backgroundColor,
+      backgroundImagePath: resolvedBgPath,
+      backgroundBlur,
+      backgroundDim,
       focalPoint,
+      focalPointCoords,
       probe,
       dynamicCropExpr,
     });

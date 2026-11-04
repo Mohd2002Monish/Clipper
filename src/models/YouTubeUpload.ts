@@ -19,6 +19,8 @@ export interface IYouTubeUpload {
   status: 'uploading' | 'completed' | 'failed';
   videoId?: string;
   youtubeUrl?: string;
+  thumbnailUrl?: string;
+  thumbnailPath?: string;
   error?: string;
   publishedAt?: Date;
   views?: number;
@@ -103,6 +105,12 @@ const YouTubeUploadSchema = new Schema<IYouTubeUploadDocument>(
       type: String,
     },
     youtubeUrl: {
+      type: String,
+    },
+    thumbnailUrl: {
+      type: String,
+    },
+    thumbnailPath: {
       type: String,
     },
     error: {

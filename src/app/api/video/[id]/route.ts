@@ -60,6 +60,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   if (ext === '.webm') contentType = 'video/webm';
   else if (ext === '.mov') contentType = 'video/quicktime';
   else if (ext === '.mkv') contentType = 'video/x-matroska';
+  else if (ext === '.jpg' || ext === '.jpeg') contentType = 'image/jpeg';
+  else if (ext === '.png') contentType = 'image/png';
+  else if (ext === '.webp') contentType = 'image/webp';
+  else if (ext === '.gif') contentType = 'image/gif';
 
   if (!rangeHeader) {
     const fileStream = fs.createReadStream(targetFile);
