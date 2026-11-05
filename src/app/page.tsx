@@ -2158,8 +2158,16 @@ export default function HomePage() {
         </main>
       )}
 
-      {/* Screen 1.5: Mobile Phone Clip Ingestion Hub & Drive Staging */}
-      {activeTab === 'clip-ingest' && <ClipIngestQueueView />}
+      {/* Screen 1.5: Mobile Phone Clip Ingestion Hub, Table & Leads */}
+      {(activeTab === 'clip-ingest' || activeTab === 'app-leads-table') && (
+        <ClipIngestQueueView initialSubTab="table" onNavigateTab={(tab) => setActiveTab(tab)} />
+      )}
+      {activeTab === 'app-vault-leads' && (
+        <ClipIngestQueueView initialSubTab="vault-leads" onNavigateTab={(tab) => setActiveTab(tab)} />
+      )}
+      {activeTab === 'app-worker-status' && (
+        <ClipIngestQueueView initialSubTab="worker" onNavigateTab={(tab) => setActiveTab(tab)} />
+      )}
 
       {/* Screen 2: Job Queue & Active Monitoring */}
       {activeTab === 'queue' && (

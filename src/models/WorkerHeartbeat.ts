@@ -23,3 +23,4 @@ const WorkerHeartbeatSchema = new Schema<IWorkerHeartbeatDocument>(
 
 export const WorkerHeartbeat: Model<IWorkerHeartbeatDocument> =
   mongoose.models.WorkerHeartbeat || mongoose.model<IWorkerHeartbeatDocument>('WorkerHeartbeat', WorkerHeartbeatSchema);
+

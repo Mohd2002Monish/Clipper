@@ -32,11 +32,15 @@ import {
   FolderGit2,
   Users,
   Smartphone,
+  HardDrive,
 } from 'lucide-react';
 
 export type TabType =
   | 'new-job'
   | 'clip-ingest'
+  | 'app-leads-table'
+  | 'app-vault-leads'
+  | 'app-worker-status'
   | 'queue'
   | 'history'
   | 'media-library'
@@ -83,7 +87,7 @@ interface SubMenuItem {
 }
 
 interface MenuGroup {
-  id: 'videos' | 'growth' | 'youtube' | 'threads' | 'instagram' | 'facebook';
+  id: 'videos' | 'mobile-app' | 'growth' | 'youtube' | 'threads' | 'instagram' | 'facebook';
   label: string;
   description: string;
   icon: React.ComponentType<{ className?: string }>;
@@ -144,16 +148,6 @@ export function Sidebar({
           activeBg: 'bg-cyan-600 text-white shadow-md shadow-cyan-600/30 font-semibold',
         },
         {
-          id: 'clip-ingest',
-          label: 'Mobile Clip Ingest',
-          description: 'Phone queue & Drive staging',
-          icon: Smartphone,
-          accent: 'text-sky-400',
-          badge: 'Cloud',
-          badgeColor: 'bg-sky-500/20 text-sky-300 border border-sky-500/30 font-semibold',
-          activeBg: 'bg-sky-600 text-white shadow-md shadow-sky-600/30 font-semibold',
-        },
-        {
           id: 'queue',
           label: 'Job Queue',
           description: 'Active rendering tasks',
@@ -170,6 +164,46 @@ export function Sidebar({
           icon: History,
           accent: 'text-indigo-400',
           activeBg: 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30 font-semibold',
+        },
+      ],
+    },
+    {
+      id: 'mobile-app',
+      label: 'Mobile Ingest',
+      description: 'Phone clips, leads & queue',
+      icon: Smartphone,
+      accent: 'text-sky-400',
+      iconBg: 'bg-sky-500/10 text-sky-400 border border-sky-500/20',
+      badge: 'Live App',
+      badgeColor: 'bg-gradient-to-r from-sky-500 to-blue-600 text-white font-bold',
+      items: [
+        {
+          id: 'clip-ingest',
+          label: 'All Ingested Table',
+          description: 'Table of phone links & leads',
+          icon: Smartphone,
+          accent: 'text-sky-400',
+          badge: 'Table',
+          badgeColor: 'bg-sky-500/20 text-sky-300 border border-sky-500/30 font-semibold',
+          activeBg: 'bg-sky-600 text-white shadow-md shadow-sky-600/30 font-semibold',
+        },
+        {
+          id: 'app-vault-leads',
+          label: 'App #VAULT Leads',
+          description: 'Tagged movie leads from phone',
+          icon: Users,
+          accent: 'text-amber-400',
+          badge: 'Leads',
+          badgeColor: 'bg-amber-500/20 text-amber-300 border border-amber-500/30 font-semibold',
+          activeBg: 'bg-amber-600 text-white shadow-md shadow-amber-600/30 font-semibold',
+        },
+        {
+          id: 'app-worker-status',
+          label: 'Worker & Drive Staging',
+          description: 'Mac worker ping & cloud folders',
+          icon: HardDrive,
+          accent: 'text-emerald-400',
+          activeBg: 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30 font-semibold',
         },
       ],
     },
@@ -415,7 +449,9 @@ export function Sidebar({
                         {isGroupActive && (
                           <span
                             className={`w-1.5 h-1.5 rounded-full ${
-                              group.id === 'youtube'
+                              group.id === 'mobile-app'
+                                ? 'bg-sky-400'
+                                : group.id === 'youtube'
                                 ? 'bg-red-400'
                                 : group.id === 'threads'
                                 ? 'bg-purple-400'
