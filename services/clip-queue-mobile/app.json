@@ -10,7 +10,7 @@
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#0284c7"
+      "backgroundColor": "#0b0f19"
     },
     "ios": {
       "supportsTablet": false,
@@ -20,7 +20,7 @@
       "package": "com.mohd4monish.videotimmer",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#0284c7"
+        "backgroundColor": "#0b0f19"
       },
       "intentFilters": [
         {
@@ -36,6 +36,14 @@
         }
       ]
     },
+    "plugins": [
+      [
+        "expo-share-intent",
+        {
+          "package": "com.mohd4monish.videotimmer"
+        }
+      ]
+    ],
     "extra": {
       "eas": {
         "projectId": "b0a2a8a8-43a5-4237-a6d5-0642db611990"

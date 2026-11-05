@@ -35,6 +35,8 @@ interface ClipQueueItem {
     title?: string;
     author?: string;
     durationSeconds?: number;
+    notes?: string;
+    tags?: string[];
   };
   driveDetails?: {
     webViewLink?: string;
@@ -337,6 +339,12 @@ export function ClipIngestQueueView() {
                       <Folder className="w-3 h-3 text-slate-400" />
                       Drive Folder: <strong className="text-slate-800">{item.targetFolder?.folderName || 'General'}</strong>
                     </span>
+
+                    {item.contentMeta?.notes ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 text-[10px] font-bold border border-amber-200">
+                        Note: {item.contentMeta.notes}
+                      </span>
+                    ) : null}
                   </div>
                 </div>
 

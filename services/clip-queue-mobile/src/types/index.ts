@@ -18,6 +18,8 @@ export interface ClipQueueItem {
     title?: string;
     author?: string;
     durationSeconds?: number;
+    notes?: string;
+    tags?: string[];
   };
   driveDetails?: {
     webViewLink?: string;
@@ -31,6 +33,16 @@ export interface IngestPayload {
   folderId: string;
   folderName: string;
   notes?: string;
+  tags?: string[];
+  devicePushToken?: string;
   sourceClient?: string;
+}
+
+export interface WorkerHeartbeatStatus {
+  isOnline: boolean;
+  isRunning?: boolean;
+  activeIngests?: number;
+  lastPingAt?: string;
+  secondsAgo?: number;
 }
 

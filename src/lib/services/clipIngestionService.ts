@@ -1,9 +1,11 @@
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
 import { spawn } from 'child_process';
 import { connectMongo } from '@/lib/db';
 import { ClipQueue, IClipQueueDocument } from '@/models/ClipQueue';
 import { DriveFolderRegistry } from '@/models/DriveFolderRegistry';
+import { WorkerHeartbeat } from '@/models/WorkerHeartbeat';
 import { driveService } from '@/lib/services/driveService';
 import { Setting } from '@/models/Setting';
 import { logger } from '@/lib/logger/logger';
@@ -216,6 +218,20 @@ export class ClipIngestionService {
       };
       await item.save();
 
+      // 6. Trigger Push Notification to Mobile Device
+      if (item.devicePushToken) {
+        this.sendExpoPushNotification(
+          item.devicePushToken,
+          'Ready in Google Drive',
+          `"${downloadResult.title || 'Clip'}" uploaded to Drive / ${targetFolderName} (${downloadResult.resolution})`,
+          {
+            driveUrl: driveRes.webViewLink,
+            folderName: targetFolderName,
+            clipId: String(item._id),
+          }
+        ).catch(() => {});
+      }
+
       logger.system(
         'info',
         'CLIP_INGEST_SUCCESS',
@@ -255,6 +271,7 @@ export class ClipIngestionService {
     try {
       await connectMongo();
       const pendingItems = await ClipQueue.find({ status: 'pending' }).sort({ createdAt: 1 }).limit(10);
+      await this.sendHeartbeat(true, pendingItems.length);
 
       for (const item of pendingItems) {
         try {
@@ -266,9 +283,69 @@ export class ClipIngestionService {
       }
     } finally {
       this.isProcessing = false;
+      await this.sendHeartbeat(true, 0);
     }
 
     return { processed, errors };
+  }
+
+  /**
+   * Sends a mobile push notification via Expo Push Notification service
+   */
+  public async sendExpoPushNotification(
+    token: string,
+    title: string,
+    body: string,
+    data?: Record<string, any>
+  ): Promise<void> {
+    if (!token || (!token.startsWith('ExponentPushToken') && !token.startsWith('ExpoPushToken'))) {
+      return;
+    }
+
+    try {
+      await fetch('https://exp.host/--/api/v2/push/send', {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Accept-encoding': 'gzip, deflate',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          to: token,
+          sound: 'default',
+          title,
+          body,
+          data,
+          priority: 'high',
+        }),
+      });
+      logger.system('info', 'EXPO_PUSH_SENT', `Push notification sent to ${token.substring(0, 20)}...`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.system('warn', 'EXPO_PUSH_FAILED', `Failed to send push notification: ${msg}`);
+    }
+  }
+
+  /**
+   * Pings MongoDB with current Mac worker heartbeat so mobile clients can see live status
+   */
+  public async sendHeartbeat(isRunning: boolean = true, activeIngests: number = 0): Promise<void> {
+    try {
+      await connectMongo();
+      await WorkerHeartbeat.findOneAndUpdate(
+        { workerName: 'Mac-Worker' },
+        {
+          workerName: 'Mac-Worker',
+          isRunning,
+          activeIngests,
+          lastPingAt: new Date(),
+          metadata: { hostname: os.hostname(), pid: process.pid },
+        },
+        { upsert: true }
+      );
+    } catch {
+      // Non-fatal
+    }
   }
 
   /**

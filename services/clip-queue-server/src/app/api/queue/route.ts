@@ -40,6 +40,85 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
+    await connectMongo();
+
+    // 1. Support Batch Submissions: { items: [{ url, folderName, notes, tags }] }
+    if (Array.isArray(body.items) && body.items.length > 0) {
+      const createdItems = [];
+      const skippedItems = [];
+
+      for (const entry of body.items) {
+        const rawUrl = entry.url;
+        if (!rawUrl || typeof rawUrl !== 'string' || !rawUrl.trim()) continue;
+
+        const { cleanUrl, platform } = parseAndCleanUrl(rawUrl);
+
+        const existingPending = await ClipQueue.findOne({
+          cleanUrl,
+          status: { $in: ['pending', 'processing', 'downloading'] },
+        });
+
+        if (existingPending) {
+          skippedItems.push(cleanUrl);
+          continue;
+        }
+
+        const targetFolder = {
+          folderId: entry.folderId || body.folderId || 'root',
+          folderName: entry.folderName || body.folderName || 'General',
+          parentPath: entry.parentPath || '',
+        };
+
+        const contentMeta = {
+          title: entry.title || '',
+          author: entry.author || '',
+          description: entry.description || '',
+          tags: Array.isArray(entry.tags) ? entry.tags : [],
+          notes: entry.notes || body.notes || '',
+        };
+
+        const processingDirectives = {
+          autoSplit: !!(entry.autoSplit ?? body.autoSplit),
+          partDurationSeconds: entry.partDurationSeconds || body.partDurationSeconds || 60,
+          reframeMode: entry.reframeMode || body.reframeMode || 'blur',
+          targetAspectRatio: entry.targetAspectRatio || (platform === 'youtube_shorts' || platform === 'instagram_reel' ? '9:16' : '16:9'),
+          autoCaption: !!(entry.autoCaption ?? body.autoCaption),
+          autoPublishCampaignId: entry.autoPublishCampaignId || '',
+        };
+
+        const queueItem = await ClipQueue.create({
+          url: rawUrl.trim(),
+          cleanUrl,
+          platform,
+          status: 'pending',
+          targetFolder,
+          contentMeta,
+          processingDirectives,
+          devicePushToken: entry.devicePushToken || body.devicePushToken || '',
+          executionMeta: {
+            attempts: 0,
+            maxAttempts: 3,
+            sourceClient: {
+              type: body.sourceClient || 'mobile_batch',
+              deviceInfo: body.deviceInfo || req.headers.get('user-agent') || 'Mobile Device',
+              appVersion: body.appVersion || '1.1.0',
+            },
+          },
+        });
+
+        createdItems.push(queueItem);
+      }
+
+      return NextResponse.json({
+        success: true,
+        batch: true,
+        addedCount: createdItems.length,
+        skippedCount: skippedItems.length,
+        items: createdItems,
+      }, { status: 201 });
+    }
+
+    // 2. Single Item Submission
     const rawUrl = body.url;
 
     if (!rawUrl || typeof rawUrl !== 'string' || !rawUrl.trim()) {
@@ -47,8 +126,6 @@ export async function POST(req: NextRequest) {
     }
 
     const { cleanUrl, platform } = parseAndCleanUrl(rawUrl);
-
-    await connectMongo();
 
     // Check for identical pending entry to prevent accidental double-submits
     const existingPending = await ClipQueue.findOne({
@@ -91,7 +168,7 @@ export async function POST(req: NextRequest) {
     const sourceClient = {
       type: body.sourceClient || 'mobile_share',
       deviceInfo: body.deviceInfo || req.headers.get('user-agent') || 'Mobile Device',
-      appVersion: body.appVersion || '1.0.0',
+      appVersion: body.appVersion || '1.1.0',
     };
 
     const queueItem = await ClipQueue.create({
@@ -102,6 +179,7 @@ export async function POST(req: NextRequest) {
       targetFolder,
       contentMeta,
       processingDirectives,
+      devicePushToken: body.devicePushToken || '',
       executionMeta: {
         attempts: 0,
         maxAttempts: 3,

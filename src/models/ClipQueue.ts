@@ -59,6 +59,7 @@ export interface IClipQueue {
       appVersion?: string;
     };
   };
+  devicePushToken?: string;
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -143,6 +144,7 @@ const ClipQueueSchema = new Schema<IClipQueueDocument>(
         appVersion: { type: String },
       },
     },
+    devicePushToken: { type: String, default: '' },
   },
   {
     timestamps: true,
