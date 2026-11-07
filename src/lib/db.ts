@@ -25,8 +25,7 @@ if (!global.mongooseCache) {
   global.mongooseCache = cached;
 }
 
-const ATLAS_DIRECT_FALLBACK_URI =
-  'mongodb://mohd_monish:4oEd26IBZuo4qRkx@ac-m6raov9-shard-00-00.3hnqz7n.mongodb.net:27017,ac-m6raov9-shard-00-01.3hnqz7n.mongodb.net:27017,ac-m6raov9-shard-00-02.3hnqz7n.mongodb.net:27017/jobs?ssl=true&replicaSet=atlas-vrzmm2-shard-0&authSource=admin&retryWrites=true&w=majority';
+const ATLAS_DIRECT_FALLBACK_URI = ""
 
 export async function connectMongo(): Promise<typeof mongoose> {
   if (cached.conn) {
