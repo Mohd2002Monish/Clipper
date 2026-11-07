@@ -1,0 +1,54 @@
+{
+  "manifest_version": 3,
+  "name": "VideoTimmer IDM Video Downloader",
+  "version": "1.0.0",
+  "description": "One-click 1080p video downloader with floating IDM-style badges for local downloads and Google Drive staging.",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "permissions": [
+    "activeTab",
+    "tabs",
+    "downloads",
+    "storage",
+    "contextMenus",
+    "webRequest"
+  ],
+  "host_permissions": [
+    "http://localhost:3000/*",
+    "https://clip-queue-server.vercel.app/*",
+    "*://*.instagram.com/*",
+    "*://*.youtube.com/*",
+    "*://*.threads.net/*",
+    "*://*.facebook.com/*",
+    "*://*.x.com/*",
+    "*://*.twitter.com/*",
+    "*://*/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "VideoTimmer IDM"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.instagram.com/*",
+        "*://*.youtube.com/*",
+        "*://*.threads.net/*",
+        "*://*.facebook.com/*",
+        "*://*.x.com/*",
+        "*://*.twitter.com/*",
+        "<all_urls>"
+      ],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}
+

@@ -21,14 +21,18 @@ export async function POST(req: NextRequest) {
     }
 
     const ext = (path.extname(file.name) || '.jpg').toLowerCase();
-    const validExts = ['.jpg', '.jpeg', '.png', '.webp'];
+    const imageExts = ['.jpg', '.jpeg', '.png', '.webp'];
+    const videoExts = ['.mp4', '.mov', '.webm', '.mkv'];
+    const validExts = [...imageExts, ...videoExts];
     if (!validExts.includes(ext)) {
       return NextResponse.json(
-        { error: `Unsupported image format "${ext}". Supported thumbnail formats: ${validExts.join(', ')}` },
+        { error: `Unsupported media format "${ext}". Supported thumbnail formats: ${validExts.join(', ')}` },
         { status: 400 }
       );
     }
 
+    const isVideo = videoExts.includes(ext);
+    const mediaType = isVideo ? 'video' : 'image';
     const safeBase = path.basename(file.name, ext).replace(/[^a-zA-Z0-9_-]/g, '_');
     const uploadId = `thumb_${Date.now()}`;
     const savedFilename = `${uploadId}_${safeBase}${ext}`;
@@ -38,7 +42,7 @@ export async function POST(req: NextRequest) {
     const buffer = Buffer.from(arrayBuffer);
     fs.writeFileSync(destinationPath, buffer);
 
-    logger.system('info', 'THUMBNAIL_UPLOAD_SUCCESS', `Saved YouTube thumbnail: ${savedFilename} (${buffer.length} bytes)`);
+    logger.system('info', 'THUMBNAIL_UPLOAD_SUCCESS', `Saved thumbnail media: ${savedFilename} (${buffer.length} bytes, type: ${mediaType})`);
 
     const imageUrl = `/api/video/${savedFilename}`;
 
@@ -48,6 +52,7 @@ export async function POST(req: NextRequest) {
       savedFilename,
       storedPath: destinationPath,
       imageUrl,
+      mediaType,
       sizeBytes: buffer.length,
     });
   } catch (err: unknown) {

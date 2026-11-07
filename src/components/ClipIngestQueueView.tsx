@@ -32,6 +32,11 @@ import {
   FileText,
   Tag,
   Radio,
+  Terminal,
+  Square,
+  RotateCw,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import { NoticeModal } from './ui/NoticeModal';
 
@@ -136,6 +141,13 @@ export function ClipIngestQueueView({
   const [manualNotes, setManualNotes] = useState('');
   const [isAddingManual, setIsAddingManual] = useState(false);
 
+  // Local Mac Worker Engine Control State
+  const [isWorkerActive, setIsWorkerActive] = useState<boolean>(false);
+  const [workerPid, setWorkerPid] = useState<number | null>(null);
+  const [isTogglingWorker, setIsTogglingWorker] = useState<boolean>(false);
+  const [workerLogs, setWorkerLogs] = useState<string[]>([]);
+  const [isLogsExpanded, setIsLogsExpanded] = useState<boolean>(true);
+
   // Sync subTab with initialSubTab prop if changed from sidebar
   useEffect(() => {
     if (initialSubTab) {
@@ -186,15 +198,90 @@ export function ClipIngestQueueView({
     }
   }, []);
 
+  // Fetch local worker process status
+  const fetchWorkerStatus = useCallback(async () => {
+    try {
+      const res = await fetch('/api/worker/control');
+      if (res.ok) {
+        const data = await res.json();
+        setIsWorkerActive(Boolean(data.isRunning));
+        setWorkerPid(data.pid || null);
+      }
+    } catch {
+      // Non-fatal
+    }
+  }, []);
+
+  // Fetch recent lines from worker.log
+  const fetchWorkerLogs = useCallback(async () => {
+    try {
+      const res = await fetch('/api/logs/files/worker?limit=25');
+      if (res.ok) {
+        const data = await res.json();
+        const logs = (data.logs || []).map((l: any) => l.message || JSON.stringify(l));
+        setWorkerLogs(logs.reverse());
+      }
+    } catch {
+      // Non-fatal
+    }
+  }, []);
+
+  const handleToggleWorkerEngine = async (action: 'start' | 'stop') => {
+    try {
+      setIsTogglingWorker(true);
+      const res = await fetch('/api/worker/control', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setIsWorkerActive(action === 'start');
+        setWorkerPid(data.pid || null);
+        setNotice({
+          isOpen: true,
+          title: action === 'start' ? 'Mac Worker Started' : 'Mac Worker Stopped',
+          message: action === 'start'
+            ? `Worker engine is active (PID: ${data.pid || 'Active'}). Mobile clips will automatically download and upload to Google Drive.`
+            : 'Worker engine stopped. CPU and battery are now preserved.',
+          type: 'success',
+        });
+        setTimeout(() => {
+          fetchWorkerLogs();
+          fetchHeartbeat();
+        }, 1500);
+      } else {
+        setNotice({
+          isOpen: true,
+          title: 'Worker Error',
+          message: data.error || `Failed to ${action} worker engine.`,
+          type: 'error',
+        });
+      }
+    } catch {
+      setNotice({
+        isOpen: true,
+        title: 'Communication Failure',
+        message: 'Could not contact worker control endpoint.',
+        type: 'error',
+      });
+    } finally {
+      setIsTogglingWorker(false);
+    }
+  };
+
   useEffect(() => {
     fetchQueue();
     fetchHeartbeat();
+    fetchWorkerStatus();
+    fetchWorkerLogs();
     const interval = setInterval(() => {
       fetchQueue();
       fetchHeartbeat();
+      fetchWorkerStatus();
     }, 8000);
     return () => clearInterval(interval);
-  }, [fetchQueue, fetchHeartbeat]);
+  }, [fetchQueue, fetchHeartbeat, fetchWorkerStatus, fetchWorkerLogs]);
 
   const handleProcessNow = async () => {
     try {
@@ -1021,12 +1108,21 @@ export function ClipIngestQueueView({
               </div>
               <span
                 className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
-                  heartbeat.isOnline
+                  isWorkerActive || heartbeat.isOnline
                     ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                     : 'bg-slate-100 text-slate-600 border border-slate-200'
                 }`}
               >
-                {heartbeat.isOnline ? 'Online & Ready' : 'Idle / Sleeping'}
+                {isWorkerActive ? (
+                  <>
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    Active Engine {workerPid ? `(#${workerPid})` : ''}
+                  </>
+                ) : heartbeat.isOnline ? (
+                  'Online & Ready'
+                ) : (
+                  'Idle (CPU Saved)'
+                )}
               </span>
             </div>
 
@@ -1034,6 +1130,12 @@ export function ClipIngestQueueView({
               <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
                 <span className="text-slate-500">Worker Engine</span>
                 <span className="font-semibold text-slate-800">Mac Clip Ingestion & yt-dlp</span>
+              </div>
+              <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
+                <span className="text-slate-500">Process State</span>
+                <span className="font-bold text-slate-800">
+                  {isWorkerActive ? `Running (PID: ${workerPid || 'Auto'})` : 'Stopped (Saving CPU & Battery)'}
+                </span>
               </div>
               <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
                 <span className="text-slate-500">Last Telemetry Ping</span>
@@ -1053,16 +1155,84 @@ export function ClipIngestQueueView({
               </div>
             </div>
 
-            <div className="pt-2 flex items-center gap-3">
+            <div className="pt-2 flex flex-col sm:flex-row items-center gap-3">
+              <button
+                type="button"
+                disabled={isTogglingWorker}
+                onClick={() => handleToggleWorkerEngine(isWorkerActive ? 'stop' : 'start')}
+                className={`w-full sm:flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs shadow-sm transition-all disabled:opacity-50 ${
+                  isWorkerActive
+                    ? 'bg-rose-600 hover:bg-rose-700 text-white'
+                    : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                }`}
+              >
+                {isTogglingWorker ? (
+                  <RotateCw className="w-3.5 h-3.5 animate-spin" />
+                ) : isWorkerActive ? (
+                  <Square className="w-3.5 h-3.5 fill-white" />
+                ) : (
+                  <Play className="w-3.5 h-3.5 fill-white" />
+                )}
+                <span>
+                  {isTogglingWorker
+                    ? 'Updating Worker...'
+                    : isWorkerActive
+                    ? 'Stop Worker Engine'
+                    : 'Start Mac Worker Engine'}
+                </span>
+              </button>
+
               <button
                 type="button"
                 disabled={isProcessing}
                 onClick={handleProcessNow}
-                className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs shadow-sm transition-all disabled:opacity-50"
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition-all disabled:opacity-50"
               >
                 <Play className="w-3.5 h-3.5" />
-                <span>Process Pending Ingestion</span>
+                <span>Process Now</span>
               </button>
+            </div>
+
+            {/* Live Terminal Log Stream */}
+            <div className="mt-4 pt-4 border-t border-slate-100 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-xs font-bold text-slate-700">
+                  <Terminal className="w-3.5 h-3.5 text-slate-500" />
+                  <span>Worker Console Output</span>
+                  {isWorkerActive && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={fetchWorkerLogs}
+                    className="p-1 rounded text-slate-400 hover:text-slate-600 hover:bg-slate-100 text-[10px] font-semibold"
+                    title="Refresh Output"
+                  >
+                    <RotateCw className="w-3 h-3" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsLogsExpanded((prev) => !prev)}
+                    className="text-slate-400 hover:text-slate-600 p-0.5"
+                  >
+                    {isLogsExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+              </div>
+
+              {isLogsExpanded && (
+                <div className="bg-slate-950 text-slate-200 font-mono text-[11px] p-3 rounded-xl max-h-48 overflow-y-auto space-y-1 border border-slate-800">
+                  {workerLogs.length === 0 ? (
+                    <div className="text-slate-500 italic">No recent log output. Click 'Start Mac Worker Engine' to launch.</div>
+                  ) : (
+                    workerLogs.map((line, idx) => (
+                      <div key={idx} className="leading-relaxed whitespace-pre-wrap break-all text-slate-300">
+                        {line}
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
             </div>
           </div>
 

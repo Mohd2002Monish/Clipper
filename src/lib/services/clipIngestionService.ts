@@ -9,6 +9,7 @@ import { WorkerHeartbeat } from '@/models/WorkerHeartbeat';
 import { driveService } from '@/lib/services/driveService';
 import { Setting } from '@/models/Setting';
 import { logger } from '@/lib/logger/logger';
+import { IdmLogger } from '@/lib/logger/idmLogger';
 
 interface DownloadResult {
   filePath: string;
@@ -36,6 +37,14 @@ export class ClipIngestionService {
    * Resolves the yt-dlp binary path on Mac
    */
   private getYtDlpCommand(): { bin: string; prefixArgs: string[] } {
+    // Check Homebrew paths on macOS Apple Silicon and Intel
+    if (fs.existsSync('/opt/homebrew/bin/yt-dlp')) {
+      return { bin: '/opt/homebrew/bin/yt-dlp', prefixArgs: [] };
+    }
+    if (fs.existsSync('/usr/local/bin/yt-dlp')) {
+      return { bin: '/usr/local/bin/yt-dlp', prefixArgs: [] };
+    }
+
     // Check local node_modules
     const localNodeBinary = path.resolve(process.cwd(), 'node_modules', 'youtube-dl-exec', 'bin', 'yt-dlp');
     if (fs.existsSync(localNodeBinary)) {
@@ -53,80 +62,164 @@ export class ClipIngestionService {
   }
 
   /**
-   * Downloads video via yt-dlp to local temporary directory
+   * Downloads video via yt-dlp to local temporary directory with quality control and progress reporting
    */
-  public async downloadVideo(url: string): Promise<DownloadResult> {
+  public async downloadVideo(
+    url: string,
+    quality: 'best' | '1080p' | '720p' | '480p' | 'audio' = 'best',
+    onProgress?: (progressText: string, percent?: number) => void,
+    referer?: string
+  ): Promise<DownloadResult> {
     const timestamp = Date.now();
+    const isAudio = quality === 'audio';
+    const outputExt = isAudio ? 'mp3' : 'mp4';
     const outputTemplate = path.join(this.tempDir, `clip_${timestamp}_%(id)s.%(ext)s`);
     const { bin, prefixArgs } = this.getYtDlpCommand();
 
+    // Map quality to yt-dlp format selectors
+    let formatArg = 'bestvideo+bestaudio/best';
+    if (quality === '1080p') {
+      formatArg = 'bestvideo[height<=1080]+bestaudio/best[height<=1080]/best';
+    } else if (quality === '720p') {
+      formatArg = 'bestvideo[height<=720]+bestaudio/best[height<=720]/best';
+    } else if (quality === '480p') {
+      formatArg = 'bestvideo[height<=480]+bestaudio/best[height<=480]/best';
+    } else if (isAudio) {
+      formatArg = 'bestaudio/best';
+    }
+
     const args = [
       ...prefixArgs,
-      '--format',
-      'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-      '--merge-output-format',
-      'mp4',
+      '--no-simulate',
       '--no-playlist',
-      '--print',
-      'title',
-      '--print',
-      'uploader',
-      '--print',
-      'duration',
-      '--print',
-      'resolution',
-      '--output',
-      outputTemplate,
-      url,
+      '--no-check-certificates',
+      '--format',
+      formatArg,
     ];
+
+    if (referer && referer.startsWith('http')) {
+      args.push('--referer', referer);
+    }
+    args.push(
+      '--user-agent',
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    );
+
+    if (isAudio) {
+      args.push('--extract-audio', '--audio-format', 'mp3');
+    } else {
+      args.push('--merge-output-format', 'mp4');
+    }
+
+    args.push(
+      '--print', 'title',
+      '--print', 'uploader',
+      '--print', 'duration',
+      '--print', 'resolution',
+      '--output', outputTemplate,
+      url
+    );
+
+    IdmLogger.info('DOWNLOAD_START', `Starting download for URL: ${url}`, {
+      quality,
+      formatArg,
+      bin,
+    });
 
     return new Promise((resolve, reject) => {
       let stdoutData = '';
       let stderrData = '';
+      const startTime = Date.now();
 
       const proc = spawn(bin, args);
 
       proc.stdout.on('data', (d) => {
-        stdoutData += d.toString();
+        const text = d.toString();
+        stdoutData += text;
+
+        // Parse download percentage if present
+        const match = text.match(/([0-9.]+)%/);
+        const percent = match ? parseFloat(match[1]) : undefined;
+        if (text.includes('[download]') || text.includes('[Merger]') || text.includes('[ExtractAudio]')) {
+          const trimmed = text.trim().split('\n').pop() || '';
+          if (onProgress) {
+            onProgress(trimmed, percent);
+          }
+          IdmLogger.progress('YT_DLP_PROGRESS', trimmed, { percent });
+        }
       });
 
       proc.stderr.on('data', (d) => {
-        stderrData += d.toString();
+        const text = d.toString();
+        stderrData += text;
+        if (text.includes('[download]') || text.includes('[Merger]')) {
+          const trimmed = text.trim().split('\n').pop() || '';
+          if (onProgress) {
+            onProgress(trimmed);
+          }
+          IdmLogger.progress('YT_DLP_PROGRESS', trimmed);
+        }
       });
 
       proc.on('error', (err) => {
-        reject(
-          new Error(
-            `Failed to spawn yt-dlp: ${err.message}. Please verify yt-dlp is installed on your Mac ("brew install yt-dlp").`
-          )
-        );
+        const msg = `Failed to spawn yt-dlp: ${err.message}. Please verify yt-dlp is installed on your Mac ("brew install yt-dlp").`;
+        IdmLogger.error('SPAWN_ERROR', msg, { url, err: err.message });
+        reject(new Error(msg));
       });
 
       proc.on('close', (code) => {
+        const durationSec = ((Date.now() - startTime) / 1000).toFixed(1);
+
         if (code !== 0) {
+          const errorDetail = (stderrData || stdoutData).trim();
+          IdmLogger.error('EXIT_ERROR', `yt-dlp exited with code ${code}`, {
+            url,
+            code,
+            details: errorDetail.substring(0, 500),
+          });
           return reject(
-            new Error(`yt-dlp exited with code ${code}. Details: ${stderrData || stdoutData}`)
+            new Error(`yt-dlp exited with code ${code}. Details: ${errorDetail}`)
           );
         }
 
-        // Parse prints
+        // Parse metadata prints
         const lines = stdoutData.trim().split('\n').filter(Boolean);
         const title = lines[0] || `Clip_${timestamp}`;
         const author = lines[1] || '';
         const durationSeconds = parseInt(lines[2], 10) || 0;
-        const resolution = lines[3] || '1080p';
+        const resolution = lines[3] || (isAudio ? 'Audio MP3' : '1080p');
 
-        // Find downloaded file matching pattern
+        // Locate downloaded file
         const files = fs.readdirSync(this.tempDir);
         const downloadedFile = files
-          .filter((f) => f.startsWith(`clip_${timestamp}`))
+          .filter(
+            (f) =>
+              f.startsWith(`clip_${timestamp}`) &&
+              !f.endsWith('.part') &&
+              !f.endsWith('.temp.mp4') &&
+              !f.endsWith('.ytdl')
+          )
           .map((f) => path.join(this.tempDir, f))[0];
 
         if (!downloadedFile || !fs.existsSync(downloadedFile)) {
+          IdmLogger.error('FILE_NOT_FOUND', 'Downloaded file could not be located in temp directory', {
+            tempDir: this.tempDir,
+            timestamp,
+          });
           return reject(new Error('Downloaded video file could not be located on disk.'));
         }
 
         const stat = fs.statSync(downloadedFile);
+
+        IdmLogger.success('DOWNLOAD_SUCCESS', `Successfully downloaded "${title}" (${resolution}, ${(stat.size / (1024 * 1024)).toFixed(1)} MB) in ${durationSec}s`, {
+          filePath: downloadedFile,
+          title,
+          author,
+          durationSeconds,
+          fileSizeBytes: stat.size,
+          resolution,
+          timeSec: durationSec,
+        });
 
         resolve({
           filePath: downloadedFile,
@@ -175,12 +268,19 @@ export class ClipIngestionService {
       let targetFolderId = item.targetFolder?.folderId;
       const targetFolderName = item.targetFolder?.folderName || 'General';
 
-      if (!targetFolderId || targetFolderId === 'root' || targetFolderId.startsWith('default_')) {
-        // Resolve parent from Setting
+      // If targetFolderId is missing, root, a placeholder, or a plain name instead of a 25+ char Google Drive ID
+      if (
+        !targetFolderId ||
+        targetFolderId === 'root' ||
+        targetFolderId.startsWith('default_') ||
+        targetFolderId.length < 20
+      ) {
         const setting = await Setting.findOne();
         const baseFolderId = setting?.googleDrive?.folderId;
         if (baseFolderId) {
           targetFolderId = await driveService.ensureSubfolder(baseFolderId, targetFolderName);
+        } else {
+          targetFolderId = 'root';
         }
       }
 

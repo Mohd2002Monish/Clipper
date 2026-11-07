@@ -1,4 +1,12 @@
 import 'dotenv/config';
+import dns from 'dns';
+
+try {
+  dns.setServers(['8.8.8.8', '1.1.1.1']);
+} catch {
+  // Graceful fallback
+}
+
 import { Worker, Job as BullJob } from 'bullmq';
 import { VIDEO_RENDER_QUEUE_NAME } from '../lib/queue';
 import { getRedisClient } from '../lib/redis';
@@ -110,10 +118,34 @@ async function startWorker() {
   setTimeout(runYouTubeScheduler, 30000); // Initial check after 30 seconds
   const schedulerInterval = setInterval(runYouTubeScheduler, 15 * 60 * 1000); // Check every 15 minutes
 
+  // 6. Mobile Phone Ingestion & Heartbeat Cycle (Every 20 seconds while worker is active)
+  const runClipIngestionCycle = async () => {
+    try {
+      const { clipIngestionService } = await import('../lib/services/clipIngestionService');
+      await clipIngestionService.sendHeartbeat(true, 0);
+      const res = await clipIngestionService.processPendingQueue();
+      if (res.processed > 0) {
+        logger.system('info', 'WORKER_INGEST_CYCLE', `Worker processed ${res.processed} pending mobile clips into Google Drive.`);
+      }
+    } catch (ingestErr) {
+      // Non-fatal
+    }
+  };
+
+  setTimeout(runClipIngestionCycle, 3000); // Initial check after 3 seconds
+  const clipIngestionInterval = setInterval(runClipIngestionCycle, 20 * 1000); // Check every 20 seconds
+
   // Graceful shutdown handling
   const shutdown = async (signal: string) => {
     logger.system('info', 'WORKER_SHUTTING_DOWN', `Received ${signal}. Gracefully stopping worker...`);
     clearInterval(schedulerInterval);
+    clearInterval(clipIngestionInterval);
+    try {
+      const { clipIngestionService } = await import('../lib/services/clipIngestionService');
+      await clipIngestionService.sendHeartbeat(false, 0);
+    } catch {
+      // Non-fatal
+    }
     await worker.close();
     process.exit(0);
   };

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Film,
   Layers,
@@ -45,6 +45,7 @@ export type TabType =
   | 'history'
   | 'media-library'
   | 'omni-composer'
+  | 'omni-pipelines'
   | 'calendar'
   | 'vault-crm'
   | 'youtube'
@@ -87,7 +88,7 @@ interface SubMenuItem {
 }
 
 interface MenuGroup {
-  id: 'videos' | 'mobile-app' | 'growth' | 'youtube' | 'threads' | 'instagram' | 'facebook';
+  id: 'creation' | 'autopilot' | 'ingest' | 'channels' | string;
   label: string;
   description: string;
   icon: React.ComponentType<{ className?: string }>;
@@ -108,8 +109,11 @@ export function Sidebar({
   const isMongoConnected = health?.services?.mongo?.connected ?? false;
   const isDriveConfigured = health?.services?.googleDrive?.configured ?? false;
 
-  // Track open/collapsed state of menu groups (all minimized by default; click menu-item to reveal sub-items)
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
+  // Track open/collapsed state of menu groups (Studio & Auto-Pilot open by default for immediate clarity)
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
+    creation: true,
+    autopilot: true,
+  });
 
   const toggleGroup = (groupId: string) => {
     setOpenGroups((prev) => ({
@@ -120,10 +124,10 @@ export function Sidebar({
 
   const menuGroups: MenuGroup[] = [
     {
-      id: 'videos',
-      label: 'Videos',
-      description: 'Trimming, split & render',
-      icon: Video,
+      id: 'creation',
+      label: 'Studio & Creation',
+      description: 'Reframe, split & render',
+      icon: Scissors,
       accent: 'text-blue-400',
       iconBg: 'bg-blue-500/10 text-blue-400 border border-blue-500/20',
       badge: activeJobsCount > 0 ? `${activeJobsCount} active` : null,
@@ -132,7 +136,7 @@ export function Sidebar({
         {
           id: 'new-job',
           label: 'Studio & Splitter',
-          description: 'Reframe, split & render',
+          description: '1-Click presets, cuts & reframe',
           icon: Scissors,
           accent: 'text-blue-400',
           activeBg: 'bg-blue-600 text-white shadow-md shadow-blue-600/30 font-semibold',
@@ -140,7 +144,7 @@ export function Sidebar({
         {
           id: 'media-library',
           label: 'Media Asset Library',
-          description: 'Visual asset hub & syndication',
+          description: 'Visual asset hub & rendered cuts',
           icon: FolderGit2,
           accent: 'text-cyan-400',
           badge: 'Hub',
@@ -149,8 +153,8 @@ export function Sidebar({
         },
         {
           id: 'queue',
-          label: 'Job Queue',
-          description: 'Active rendering tasks',
+          label: 'Rendering Queue',
+          description: 'Live processing tasks',
           icon: Layers,
           accent: 'text-amber-400',
           badge: activeJobsCount > 0 ? `${activeJobsCount} active` : null,
@@ -168,59 +172,29 @@ export function Sidebar({
       ],
     },
     {
-      id: 'mobile-app',
-      label: 'Mobile Ingest',
-      description: 'Phone clips, leads & queue',
-      icon: Smartphone,
-      accent: 'text-sky-400',
-      iconBg: 'bg-sky-500/10 text-sky-400 border border-sky-500/20',
-      badge: 'Live App',
-      badgeColor: 'bg-gradient-to-r from-sky-500 to-blue-600 text-white font-bold',
-      items: [
-        {
-          id: 'clip-ingest',
-          label: 'All Ingested Table',
-          description: 'Table of phone links & leads',
-          icon: Smartphone,
-          accent: 'text-sky-400',
-          badge: 'Table',
-          badgeColor: 'bg-sky-500/20 text-sky-300 border border-sky-500/30 font-semibold',
-          activeBg: 'bg-sky-600 text-white shadow-md shadow-sky-600/30 font-semibold',
-        },
-        {
-          id: 'app-vault-leads',
-          label: 'App #VAULT Leads',
-          description: 'Tagged movie leads from phone',
-          icon: Users,
-          accent: 'text-amber-400',
-          badge: 'Leads',
-          badgeColor: 'bg-amber-500/20 text-amber-300 border border-amber-500/30 font-semibold',
-          activeBg: 'bg-amber-600 text-white shadow-md shadow-amber-600/30 font-semibold',
-        },
-        {
-          id: 'app-worker-status',
-          label: 'Worker & Drive Staging',
-          description: 'Mac worker ping & cloud folders',
-          icon: HardDrive,
-          accent: 'text-emerald-400',
-          activeBg: 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30 font-semibold',
-        },
-      ],
-    },
-    {
-      id: 'growth',
-      label: 'Publish & Growth',
-      description: 'Omni-posting, calendar & CRM',
+      id: 'autopilot',
+      label: 'Auto-Pilot & Post',
+      description: 'Multi-channel syndication',
       icon: Share2,
       accent: 'text-purple-400',
       iconBg: 'bg-purple-500/10 text-purple-400 border border-purple-500/20',
-      badge: 'Hub',
-      badgeColor: 'bg-purple-600 text-white font-bold',
+      badge: 'Auto',
+      badgeColor: 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-bold',
       items: [
+        {
+          id: 'omni-pipelines',
+          label: 'Auto-Pilot Pipelines',
+          description: 'Drive folder to all channels',
+          icon: Layers,
+          accent: 'text-sky-400',
+          badge: 'Auto',
+          badgeColor: 'bg-sky-500/20 text-sky-300 border border-sky-500/30 font-semibold',
+          activeBg: 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-600/30 font-semibold',
+        },
         {
           id: 'omni-composer',
           label: 'Omni-Post Studio',
-          description: 'One-click 4-channel cross-post',
+          description: '1 Video to 4 channels cross-post',
           icon: Share2,
           accent: 'text-purple-400',
           badge: 'Omni',
@@ -237,6 +211,28 @@ export function Sidebar({
           badgeColor: 'bg-amber-500/20 text-amber-300 border border-amber-500/30 font-semibold',
           activeBg: 'bg-amber-600 text-white shadow-md shadow-amber-600/30 font-semibold',
         },
+      ],
+    },
+    {
+      id: 'ingest',
+      label: 'Ingest & Leads',
+      description: 'Downloads & audience CRM',
+      icon: Smartphone,
+      accent: 'text-sky-400',
+      iconBg: 'bg-sky-500/10 text-sky-400 border border-sky-500/20',
+      badge: 'Hub',
+      badgeColor: 'bg-sky-500/20 text-sky-300 border border-sky-500/30 font-semibold',
+      items: [
+        {
+          id: 'clip-ingest',
+          label: 'Ingested Clips Table',
+          description: 'IDM downloads & mobile queue',
+          icon: Smartphone,
+          accent: 'text-sky-400',
+          badge: 'Queue',
+          badgeColor: 'bg-sky-500/20 text-sky-300 border border-sky-500/30 font-semibold',
+          activeBg: 'bg-sky-600 text-white shadow-md shadow-sky-600/30 font-semibold',
+        },
         {
           id: 'vault-crm',
           label: 'Movie Vault CRM',
@@ -250,144 +246,70 @@ export function Sidebar({
       ],
     },
     {
-      id: 'youtube',
-      label: 'YouTube Video',
-      description: 'Upload, shorts & views',
+      id: 'channels',
+      label: 'Channels & Hubs',
+      description: 'Platform deep-dive studios',
       icon: Youtube,
-      accent: 'text-red-500',
-      iconBg: 'bg-red-500/10 text-red-500 border border-red-500/20',
-      badge: 'Live',
-      badgeColor: 'bg-red-500 text-white font-bold',
+      accent: 'text-rose-400',
+      iconBg: 'bg-rose-500/10 text-rose-400 border border-rose-500/20',
+      badge: 'Channels',
+      badgeColor: 'bg-slate-800 text-slate-300 font-semibold',
       items: [
         {
           id: 'youtube',
-          label: 'YouTube Publisher',
-          description: 'Upload Drive videos & Shorts',
-          icon: UploadCloud,
+          label: 'YouTube Studio',
+          description: 'Drive upload, Shorts & views',
+          icon: Youtube,
           accent: 'text-red-400',
-          badge: 'Live',
+          badge: 'Shorts',
           badgeColor: 'bg-red-500 text-white font-bold',
           activeBg: 'bg-red-600 text-white shadow-md shadow-red-600/30 font-semibold',
         },
         {
-          id: 'uploaded-videos',
-          label: 'Uploaded Videos',
-          description: 'Track views & performance',
-          icon: Eye,
-          accent: 'text-rose-400',
-          activeBg: 'bg-rose-600 text-white shadow-md shadow-rose-600/30 font-semibold',
+          id: 'instagram-composer',
+          label: 'Instagram Studio',
+          description: 'Reels composer & queue',
+          icon: Instagram,
+          accent: 'text-pink-400',
+          badge: 'Reels',
+          badgeColor: 'bg-gradient-to-r from-pink-500 to-rose-500 text-white font-bold',
+          activeBg: 'bg-gradient-to-r from-pink-600 to-rose-600 text-white shadow-md shadow-pink-600/30 font-semibold',
         },
-      ],
-    },
-    {
-      id: 'threads',
-      label: 'Threads',
-      description: 'Post, schedule & insights',
-      icon: AtSign,
-      accent: 'text-purple-400',
-      iconBg: 'bg-purple-500/10 text-purple-400 border border-purple-500/20',
-      badge: 'Native',
-      badgeColor: 'bg-purple-500 text-white font-bold',
-      items: [
         {
           id: 'threads-composer',
-          label: 'Composer & Scheduler',
-          description: 'Draft, video & queue',
-          icon: FileText,
+          label: 'Threads Studio',
+          description: 'Drafts, queue & analytics',
+          icon: AtSign,
           accent: 'text-purple-400',
           activeBg: 'bg-purple-600 text-white shadow-md shadow-purple-600/30 font-semibold',
         },
         {
-          id: 'threads-posts',
-          label: 'Scheduled & Queue',
-          description: 'Manage future slots',
-          icon: Clock,
-          accent: 'text-amber-400',
-          activeBg: 'bg-purple-600 text-white shadow-md shadow-purple-600/30 font-semibold',
-        },
-        {
-          id: 'threads-analytics',
-          label: 'Analytics & Insights',
-          description: 'Views, engagement & slots',
-          icon: BarChart3,
-          accent: 'text-indigo-400',
-          activeBg: 'bg-purple-600 text-white shadow-md shadow-purple-600/30 font-semibold',
-        },
-      ],
-    },
-    {
-      id: 'instagram',
-      label: 'Instagram',
-      description: 'Reels, queue & insights',
-      icon: Instagram,
-      accent: 'text-pink-400',
-      iconBg: 'bg-gradient-to-tr from-amber-500/10 via-pink-500/10 to-purple-500/10 text-pink-400 border border-pink-500/20',
-      badge: 'Reels',
-      badgeColor: 'bg-gradient-to-r from-pink-500 to-rose-500 text-white font-bold',
-      items: [
-        {
-          id: 'instagram-composer',
-          label: 'Reels Composer',
-          description: 'Draft, video & schedule',
-          icon: FileText,
-          accent: 'text-pink-400',
-          activeBg: 'bg-gradient-to-r from-pink-600 to-rose-600 text-white shadow-md shadow-pink-600/30 font-semibold',
-        },
-        {
-          id: 'instagram-posts',
-          label: 'Scheduled & Queue',
-          description: 'Manage Reels queue',
-          icon: Clock,
-          accent: 'text-amber-400',
-          activeBg: 'bg-gradient-to-r from-pink-600 to-rose-600 text-white shadow-md shadow-pink-600/30 font-semibold',
-        },
-        {
-          id: 'instagram-analytics',
-          label: 'Reels Analytics',
-          description: 'Reach, views & saves',
-          icon: BarChart3,
-          accent: 'text-indigo-400',
-          activeBg: 'bg-gradient-to-r from-pink-600 to-rose-600 text-white shadow-md shadow-pink-600/30 font-semibold',
-        },
-      ],
-    },
-    {
-      id: 'facebook',
-      label: 'Facebook',
-      description: 'Reels, videos & pages',
-      icon: Facebook,
-      accent: 'text-blue-400',
-      iconBg: 'bg-blue-600/10 text-blue-400 border border-blue-500/20',
-      badge: 'Pages',
-      badgeColor: 'bg-blue-600 text-white font-bold',
-      items: [
-        {
           id: 'facebook-composer',
-          label: 'Reels & Video Composer',
-          description: 'Draft, video & schedule',
-          icon: FileText,
+          label: 'Facebook Studio',
+          description: 'Page posts & video queue',
+          icon: Facebook,
           accent: 'text-blue-400',
           activeBg: 'bg-blue-600 text-white shadow-md shadow-blue-600/30 font-semibold',
         },
         {
-          id: 'facebook-posts',
-          label: 'Scheduled & Queue',
-          description: 'Manage Facebook queue',
-          icon: Clock,
-          accent: 'text-amber-400',
-          activeBg: 'bg-blue-600 text-white shadow-md shadow-blue-600/30 font-semibold',
-        },
-        {
-          id: 'facebook-analytics',
-          label: 'Page Analytics',
-          description: 'Reach, views & reactions',
-          icon: BarChart3,
-          accent: 'text-indigo-400',
-          activeBg: 'bg-blue-600 text-white shadow-md shadow-blue-600/30 font-semibold',
+          id: 'settings',
+          label: 'Settings & Integrations',
+          description: 'API keys, accounts & setup',
+          icon: Settings,
+          accent: 'text-slate-400',
+          activeBg: 'bg-slate-700 text-white shadow-md font-semibold',
         },
       ],
     },
   ];
+
+  // Auto-open group containing active tab
+  useEffect(() => {
+    const parentGroup = menuGroups.find((g) => g.items.some((i) => i.id === activeTab));
+    if (parentGroup) {
+      setOpenGroups((prev) => ({ ...prev, [parentGroup.id]: true }));
+    }
+  }, [activeTab]);
 
   return (
     <aside className="w-64 bg-slate-900 border-r border-slate-800 flex flex-col shrink-0 min-h-screen text-slate-300 select-none">
@@ -449,15 +371,13 @@ export function Sidebar({
                         {isGroupActive && (
                           <span
                             className={`w-1.5 h-1.5 rounded-full ${
-                              group.id === 'mobile-app'
-                                ? 'bg-sky-400'
-                                : group.id === 'youtube'
-                                ? 'bg-red-400'
-                                : group.id === 'threads'
+                              group.id === 'creation'
+                                ? 'bg-blue-400'
+                                : group.id === 'autopilot'
                                 ? 'bg-purple-400'
-                                : group.id === 'instagram'
-                                ? 'bg-pink-400'
-                                : 'bg-blue-400'
+                                : group.id === 'ingest'
+                                ? 'bg-sky-400'
+                                : 'bg-rose-400'
                             }`}
                             title="Active section"
                           />

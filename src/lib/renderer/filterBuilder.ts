@@ -44,6 +44,12 @@ export interface TextOverlayRenderConfig {
   subtitleStyle?: SubtitleRenderStyle;
 }
 
+export interface ThumbnailIntroRenderConfig {
+  enabled?: boolean;
+  mediaPath?: string;
+  durationSeconds?: number;
+}
+
 export interface RenderRecipeOptions {
   inputPath: string;
   outputPath: string;
@@ -55,6 +61,7 @@ export interface RenderRecipeOptions {
   backgroundImagePath?: string;
   backgroundBlur?: number;
   backgroundDim?: number;
+  thumbnailIntro?: ThumbnailIntroRenderConfig;
   focalPoint?: FocalPoint;
   focalPointCoords?: { x: number; y: number };
   qualityPreset?: 'fast' | 'balanced' | 'high';
@@ -87,6 +94,7 @@ export function buildRenderRecipe(options: RenderRecipeOptions): RenderRecipe {
     backgroundImagePath,
     backgroundBlur = 0,
     backgroundDim = 0,
+    thumbnailIntro,
     focalPoint = 'center',
     focalPointCoords,
     qualityPreset = 'balanced',
@@ -176,6 +184,20 @@ export function buildRenderRecipe(options: RenderRecipeOptions): RenderRecipe {
       cropX = `in_w-${targetW}`;
     }
     filters.push(`[scaled]crop=${targetW}:${targetH}:${cropX}:(in_h-${targetH})/2${currentVideoOut}`);
+  }
+
+  // Stage 2.5: Thumbnail / Cover Frame Intro (First Second Overlay)
+  if (thumbnailIntro?.enabled && thumbnailIntro.mediaPath && fs.existsSync(thumbnailIntro.mediaPath)) {
+    const escapedThumb = escapeFilePathForFfmpeg(thumbnailIntro.mediaPath);
+    const thumbDuration = Math.max(0.2, thumbnailIntro.durationSeconds || 1.0);
+    filters.push(
+      `movie='${escapedThumb}':loop=0[thumb_raw];[thumb_raw]scale=${targetW}:${targetH}:force_original_aspect_ratio=increase,crop=${targetW}:${targetH},setsar=1[thumb_card]`
+    );
+    const nextVideoOut = `[v_with_thumb]`;
+    filters.push(
+      `${currentVideoOut}[thumb_card]overlay=0:0:enable='between(t,0,${thumbDuration})'${nextVideoOut}`
+    );
+    currentVideoOut = nextVideoOut;
   }
 
   // Stage 3: Text Overlays (TOP & BOTTOM)

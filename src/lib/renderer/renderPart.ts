@@ -186,6 +186,16 @@ export class PartRenderer {
       }
     }
 
+    // 4.5. Resolve thumbnail intro media path if thumbnail intro is enabled
+    let resolvedThumbPath = outputFormat.thumbnailIntro?.mediaPath;
+    if (!resolvedThumbPath && outputFormat.thumbnailIntro?.mediaUrl) {
+      const clean = outputFormat.thumbnailIntro.mediaUrl.replace(/^\/api\/video\//, '');
+      const candidate = path.isAbsolute(clean) ? clean : path.join(config.uploadsDir, clean);
+      if (fs.existsSync(candidate)) {
+        resolvedThumbPath = candidate;
+      }
+    }
+
     // 5. Build Recipe
     const recipe = buildRenderRecipe({
       inputPath: sourceFilePath,
@@ -198,6 +208,13 @@ export class PartRenderer {
       backgroundImagePath: resolvedBgPath,
       backgroundBlur: outputFormat.backgroundBlur,
       backgroundDim: outputFormat.backgroundDim,
+      thumbnailIntro: outputFormat.thumbnailIntro?.enabled
+        ? {
+            enabled: true,
+            mediaPath: resolvedThumbPath,
+            durationSeconds: outputFormat.thumbnailIntro.durationSeconds || 1.0,
+          }
+        : undefined,
       focalPoint: outputFormat.focalPoint,
       focalPointCoords: outputFormat.focalPointCoords,
       qualityPreset: outputFormat.qualityPreset,
@@ -239,6 +256,21 @@ export class PartRenderer {
 
         // Move verified file to outputs
         fs.renameSync(tempOutputPath, finalOutputPath);
+
+        // If thumbnail intro was supplied, also copy companion thumbnail file alongside the clip
+        if (resolvedThumbPath && fs.existsSync(resolvedThumbPath)) {
+          try {
+            const companionThumbPath = path.join(
+              jobOutputDir,
+              `${path.basename(finalOutputPath, path.extname(finalOutputPath))}.jpg`
+            );
+            if (!fs.existsSync(companionThumbPath)) {
+              fs.copyFileSync(resolvedThumbPath, companionThumbPath);
+            }
+          } catch {
+            // Non-critical, ignore
+          }
+        }
 
         // Clean up temporary text files
         for (const tf of createdTextFiles) {

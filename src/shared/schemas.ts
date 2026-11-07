@@ -111,6 +111,16 @@ export const TextOverlaySettingsSchema = z.object({
 });
 export type TextOverlaySettings = z.infer<typeof TextOverlaySettingsSchema>;
 
+export const ThumbnailIntroSchema = z.object({
+  enabled: z.boolean().default(false),
+  mediaType: z.enum(['image', 'video']).default('image'),
+  mediaUrl: z.string().optional(),
+  mediaPath: z.string().optional(),
+  mediaName: z.string().optional(),
+  durationSeconds: z.number().min(0.2).max(10).default(1.0),
+});
+export type ThumbnailIntroSettings = z.infer<typeof ThumbnailIntroSchema>;
+
 export const OutputFormatSchema = z.object({
   aspectRatio: AspectRatioPresetSchema.default('9:16'),
   customAspectRatio: z.string().optional(), // e.g. "9:16"
@@ -121,6 +131,7 @@ export const OutputFormatSchema = z.object({
   backgroundImagePath: z.string().optional(),
   backgroundBlur: z.number().min(0).max(50).default(0),
   backgroundDim: z.number().min(0).max(100).default(0),
+  thumbnailIntro: ThumbnailIntroSchema.optional(),
   focalPoint: FocalPointSchema.default('center'),
   focalPointCoords: z.object({ x: z.number(), y: z.number() }).optional(),
   filenameTemplate: z.string().default('{title}_part{nn}'),

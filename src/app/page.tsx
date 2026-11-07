@@ -71,6 +71,7 @@ import { MediaLibraryView, MediaAssetItem } from '@/components/MediaLibraryView'
 import { ClipIngestQueueView } from '@/components/ClipIngestQueueView';
 import { VisualCalendarView } from '@/components/VisualCalendarView';
 import { VaultLeadManagerView } from '@/components/VaultLeadManagerView';
+import { OmniPipelineManagerView } from '@/components/OmniPipelineManagerView';
 import { VideoProbeData, IJob } from '@/shared/types';
 import { PartPlan, TextOverlaySettings } from '@/shared/schemas';
 import { CustomSelect } from '@/components/ui/CustomSelect';
@@ -165,6 +166,25 @@ export default function HomePage() {
   const [isDetectingHighlights, setIsDetectingHighlights] = useState<boolean>(false);
   const [aiMaxClips, setAiMaxClips] = useState<number>(5);
   const [aiTargetDuration, setAiTargetDuration] = useState<number>(50);
+
+  // Thumbnail Intro / First-Second Cover state
+  const [thumbnailIntro, setThumbnailIntro] = useState<{
+    enabled: boolean;
+    mediaType: 'image' | 'video';
+    mediaUrl?: string;
+    mediaPath?: string;
+    mediaName?: string;
+    durationSeconds: number;
+  }>({
+    enabled: false,
+    mediaType: 'image',
+    mediaUrl: '',
+    mediaPath: '',
+    mediaName: '',
+    durationSeconds: 1.0,
+  });
+  const [isUploadingThumbnailIntro, setIsUploadingThumbnailIntro] = useState<boolean>(false);
+  const thumbFileInputRef = useRef<HTMLInputElement>(null);
 
   // Step D Text Overlays state
   const [textOverlaySettings, setTextOverlaySettings] = useState<TextOverlaySettings>({
@@ -410,6 +430,40 @@ export default function HomePage() {
     }
   };
 
+  const handleUploadThumbnailIntro = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploadingThumbnailIntro(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch('/api/upload/thumbnail', {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await res.json();
+      if (data.success && data.imageUrl) {
+        setThumbnailIntro((prev) => ({
+          ...prev,
+          enabled: true,
+          mediaType: data.mediaType || 'image',
+          mediaUrl: data.imageUrl,
+          mediaPath: data.storedPath || '',
+          mediaName: file.name,
+        }));
+      } else {
+        alert(data.error || 'Failed to upload thumbnail');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      alert(msg || 'Error uploading thumbnail');
+    } finally {
+      setIsUploadingThumbnailIntro(false);
+      if (thumbFileInputRef.current) thumbFileInputRef.current.value = '';
+    }
+  };
+
   const formatBytes = (bytes?: number) => {
     if (!bytes) return 'N/A';
     const gb = bytes / (1024 * 1024 * 1024);
@@ -606,6 +660,14 @@ export default function HomePage() {
           backgroundImagePath: reframeMode === 'image' ? backgroundImagePath : undefined,
           backgroundBlur: reframeMode === 'image' ? backgroundBlur : 0,
           backgroundDim: reframeMode === 'image' ? backgroundDim : 0,
+          thumbnailIntro: thumbnailIntro.enabled && thumbnailIntro.mediaPath ? {
+            enabled: true,
+            mediaType: thumbnailIntro.mediaType,
+            mediaUrl: thumbnailIntro.mediaUrl,
+            mediaPath: thumbnailIntro.mediaPath,
+            mediaName: thumbnailIntro.mediaName,
+            durationSeconds: thumbnailIntro.durationSeconds || 1.0,
+          } : undefined,
           focalPoint,
           focalPointCoords,
           filenameTemplate,
@@ -724,6 +786,35 @@ export default function HomePage() {
       .replace(/{total}/g, String(computedPlan.length || 5)) + '.mp4';
   };
 
+  const handleApplyWorkflowPreset = (preset: 'viral_shorts' | 'quick_snaps' | 'ai_highlights' | 'feed_square') => {
+    if (preset === 'viral_shorts') {
+      setSelectedRatio('9:16');
+      setReframeMode('blur');
+      setSplitMode('fixed');
+      setFixedLength(60);
+      setThumbnailIntro(prev => ({ ...prev, enabled: true, durationSeconds: 1.0 }));
+    } else if (preset === 'quick_snaps') {
+      setSelectedRatio('9:16');
+      setReframeMode('blur');
+      setSplitMode('fixed');
+      setFixedLength(30);
+      setThumbnailIntro(prev => ({ ...prev, enabled: true, durationSeconds: 1.0 }));
+    } else if (preset === 'ai_highlights') {
+      setSelectedRatio('9:16');
+      setReframeMode('blur');
+      setSplitMode('ai_highlights');
+      setThumbnailIntro(prev => ({ ...prev, enabled: true, durationSeconds: 1.0 }));
+    } else if (preset === 'feed_square') {
+      setSelectedRatio('1:1');
+      setReframeMode('blur');
+      setSplitMode('fixed');
+      setFixedLength(60);
+    }
+    if (uploadedVideo) {
+      setCurrentStep(3);
+    }
+  };
+
   return (
     <div className="flex min-h-screen w-full bg-[#E3F2FD]/30">
       {/* Permanent Left Sidebar Navigation */}
@@ -753,159 +844,110 @@ export default function HomePage() {
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-6 overflow-y-auto">
-        {/* Top Navbar */}
-        <header className="flex flex-col sm:flex-row items-center justify-between gap-4 pb-6 mb-6 border-b border-[#90CAF9]/50">
+        {/* Consolidated Top Navigation & Status Bar */}
+        <header className="bg-white rounded-2xl p-3 px-5 border border-[#90CAF9]/60 shadow-xs flex flex-wrap items-center justify-between gap-3 mb-5">
           <div className="flex items-center gap-3">
-            <div className="h-11 w-11 rounded-2xl bg-[#2196F3] flex items-center justify-center shadow-md shadow-[#2196F3]/25 text-white">
-              <Film className="w-6 h-6 text-white" />
+            <div className="h-10 w-10 rounded-xl bg-[#2196F3] flex items-center justify-center shadow-md shadow-[#2196F3]/25 text-white">
+              <Film className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h1 className="text-xl font-extrabold tracking-tight text-[#0D47A1] flex items-center gap-2">
-                VideoTimmer
-                <span className="text-[10px] uppercase font-bold px-2.5 py-0.5 rounded-full bg-[#E3F2FD] text-[#0D47A1] border border-[#90CAF9]">
-                  Core v1.2
+              <div className="flex items-center gap-2">
+                <h1 className="text-base font-extrabold tracking-tight text-[#0D47A1]">
+                  VideoTimmer
+                </h1>
+                <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-[#E3F2FD] text-[#0D47A1] border border-[#90CAF9]">
+                  v1.2
                 </span>
-              </h1>
-              <p className="text-xs text-slate-600 font-medium">Reframe, Split, Safe Typography, Google Drive & YouTube Dispatcher</p>
+                <span className="text-slate-300">•</span>
+                <span className="text-xs font-semibold text-slate-700 capitalize">
+                  {activeTab.replace('-', ' ')}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-500 font-medium">Reframe, Split, Auto-Pilot &amp; Omni Dispatcher</p>
             </div>
           </div>
 
-
-
-        {/* Header Right Actions */}
-        <div className="flex flex-wrap items-center gap-2.5">
-          {/* Worker Engine Control Button & Status */}
-          <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-[#90CAF9]/60 shadow-xs text-xs">
-            <span className="relative flex h-2 w-2">
-              <span
-                className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
-                  isWorkerRunning ? 'bg-emerald-400' : 'bg-slate-300'
-                }`}
-              />
-              <span
-                className={`relative inline-flex rounded-full h-2 w-2 ${
-                  isWorkerRunning ? 'bg-emerald-500' : 'bg-slate-400'
-                }`}
-              />
-            </span>
-            <span className="font-semibold text-slate-700">
-              Worker:{' '}
-              <span className={isWorkerRunning ? 'text-emerald-700 font-bold' : 'text-slate-500'}>
-                {isWorkerRunning ? `Active${workerPid ? ` (#${workerPid})` : ''}` : 'Idle (CPU Saved)'}
+          {/* Quick Engine Badges & Controls */}
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Health / System Status */}
+            <div className="hidden md:flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200 text-xs">
+              <span className="relative flex h-2 w-2">
+                <span
+                  className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
+                    health?.status === 'healthy' ? 'bg-emerald-400' : 'bg-amber-400'
+                  }`}
+                />
+                <span
+                  className={`relative inline-flex rounded-full h-2 w-2 ${
+                    health?.status === 'healthy' ? 'bg-emerald-500' : 'bg-amber-500'
+                  }`}
+                />
               </span>
-            </span>
+              <span className="text-slate-700 font-medium">
+                {health?.services.disk ? `${formatBytes(health?.services.disk.freeBytes)} Free` : 'Engine Ready'}
+              </span>
+            </div>
+
+            {/* Worker Engine Control */}
+            <div className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200 text-xs">
+              <span className="relative flex h-2 w-2">
+                <span
+                  className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
+                    isWorkerRunning ? 'bg-emerald-400' : 'bg-slate-300'
+                  }`}
+                />
+                <span
+                  className={`relative inline-flex rounded-full h-2 w-2 ${
+                    isWorkerRunning ? 'bg-emerald-500' : 'bg-slate-400'
+                  }`}
+                />
+              </span>
+              <span className="font-semibold text-slate-700">
+                Worker: <span className={isWorkerRunning ? 'text-emerald-700 font-bold' : 'text-slate-500'}>{isWorkerRunning ? 'Active' : 'Idle'}</span>
+              </span>
+              <button
+                onClick={() => handleToggleWorker(isWorkerRunning ? 'stop' : 'start')}
+                disabled={isTogglingWorker}
+                className={`btn-pressable flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-bold transition-all disabled:opacity-50 ml-1 ${
+                  isWorkerRunning
+                    ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200'
+                    : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 shadow-xs'
+                }`}
+                title={isWorkerRunning ? 'Stop rendering worker' : 'Start rendering worker'}
+              >
+                {isTogglingWorker ? (
+                  <RotateCw className="w-3 h-3 animate-spin" />
+                ) : isWorkerRunning ? (
+                  <Square className="w-3 h-3 fill-rose-600 text-rose-600" />
+                ) : (
+                  <Play className="w-3 h-3 fill-emerald-600 text-emerald-600" />
+                )}
+                <span>{isTogglingWorker ? '...' : isWorkerRunning ? 'Stop' : 'Start'}</span>
+              </button>
+            </div>
+
+            {/* Clean Cache button */}
             <button
-              onClick={() => handleToggleWorker(isWorkerRunning ? 'stop' : 'start')}
-              disabled={isTogglingWorker}
-              className={`btn-pressable flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold transition-all disabled:opacity-50 ml-1 ${
-                isWorkerRunning
-                  ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200'
-                  : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 shadow-xs'
-              }`}
-              title={isWorkerRunning ? 'Stop rendering worker to save CPU and battery' : 'Start rendering worker to process video jobs'}
+              onClick={handleCleanStorage}
+              disabled={isCleaningStorage}
+              title="Clean temporary files and cache"
+              className="btn-pressable flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[#E3F2FD] hover:bg-[#90CAF9]/30 text-[#0D47A1] border border-[#90CAF9] text-xs font-semibold transition-all disabled:opacity-50"
             >
-              {isTogglingWorker ? (
-                <RotateCw className="w-3 h-3 animate-spin" />
-              ) : isWorkerRunning ? (
-                <Square className="w-3 h-3 fill-rose-600 text-rose-600" />
-              ) : (
-                <Play className="w-3 h-3 fill-emerald-600 text-emerald-600" />
-              )}
-              <span>{isTogglingWorker ? 'Updating...' : isWorkerRunning ? 'Stop Worker' : 'Start Worker'}</span>
+              <Trash2 className={`w-3.5 h-3.5 ${isCleaningStorage ? 'animate-spin' : ''}`} />
+              <span className="hidden sm:inline">{isCleaningStorage ? 'Cleaning...' : 'Clean Cache'}</span>
+            </button>
+
+            {/* Diagnostics toggle */}
+            <button
+              type="button"
+              onClick={() => setShowDiagnostics(!showDiagnostics)}
+              className="p-1.5 rounded-xl text-slate-500 hover:text-[#0D47A1] hover:bg-slate-100 border border-slate-200 transition-all"
+              title="Toggle system diagnostic details"
+            >
+              <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${showDiagnostics ? 'rotate-180' : ''}`} />
             </button>
           </div>
-
-          {/* Health status pill */}
-          <div className="flex items-center gap-2 bg-white px-3.5 py-1.5 rounded-xl border border-[#90CAF9]/60 text-xs shadow-sm">
-            <span className="relative flex h-2 w-2">
-              <span
-                className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
-                  health?.status === 'healthy' ? 'bg-emerald-400' : 'bg-amber-400'
-                }`}
-              />
-              <span
-                className={`relative inline-flex rounded-full h-2 w-2 ${
-                  health?.status === 'healthy' ? 'bg-emerald-500' : 'bg-amber-500'
-                }`}
-              />
-            </span>
-            <span className="text-slate-700 font-semibold capitalize">
-              {health?.status || (isHealthLoading ? 'Checking...' : 'Offline')}
-            </span>
-            <button
-              onClick={fetchHealth}
-              title="Refresh System Health"
-              className="text-slate-400 hover:text-[#0D47A1] transition-colors ml-1"
-            >
-              <RotateCw className="w-3 h-3" />
-            </button>
-          </div>
-        </div>
-      </header>
-
-      {/* Sleek System Status Ribbon */}
-      <div className="bg-white rounded-2xl p-2.5 px-4 border border-[#90CAF9]/60 shadow-xs flex items-center justify-between mb-5">
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            <span className="relative flex h-2.5 w-2.5">
-              <span
-                className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
-                  health?.status === 'healthy' ? 'bg-emerald-400' : 'bg-amber-400'
-                }`}
-              />
-              <span
-                className={`relative inline-flex rounded-full h-2.5 w-2.5 ${
-                  health?.status === 'healthy' ? 'bg-emerald-500' : 'bg-amber-500'
-                }`}
-              />
-            </span>
-            <span className="text-xs font-bold text-[#0D47A1]">
-              Engine {health?.status === 'healthy' ? 'Active' : 'Checking'}
-            </span>
-          </div>
-
-          <span className="text-slate-300 hidden sm:inline">&bull;</span>
-
-          <div className="hidden sm:flex items-center gap-4 text-xs text-slate-600 font-medium">
-            <span className="flex items-center gap-1.5">
-              <Activity className={`w-3.5 h-3.5 ${isWorkerRunning ? 'text-emerald-600' : 'text-slate-400'}`} />
-              Worker {isWorkerRunning ? 'Active' : 'Idle'}
-            </span>
-            <span className="flex items-center gap-1.5">
-              <Cpu className="w-3.5 h-3.5 text-[#2196F3]" />
-              FFmpeg {health?.services.ffmpeg.available ? 'Ready' : 'Offline'}
-            </span>
-            <span className="flex items-center gap-1.5">
-              <Database className="w-3.5 h-3.5 text-emerald-600" />
-              Mongo &amp; Redis {health?.services.mongo.connected && health?.services.redis.connected ? 'Connected' : 'Partial'}
-            </span>
-            <span className="flex items-center gap-1.5">
-              <HardDrive className="w-3.5 h-3.5 text-indigo-600" />
-              {formatBytes(health?.services.disk.freeBytes)} Free
-            </span>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <button
-            onClick={handleCleanStorage}
-            disabled={isCleaningStorage}
-            title="Clean temporary files and cache"
-            className="btn-pressable flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#E3F2FD] hover:bg-[#90CAF9]/30 text-[#0D47A1] border border-[#90CAF9] text-xs font-semibold transition-all disabled:opacity-50"
-          >
-            <Trash2 className={`w-3 h-3 ${isCleaningStorage ? 'animate-spin' : ''}`} />
-            <span>{isCleaningStorage ? 'Cleaning...' : 'Clean Cache'}</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setShowDiagnostics(!showDiagnostics)}
-            className="p-1 rounded-lg text-slate-400 hover:text-[#0D47A1] hover:bg-[#F0F7FF] transition-all"
-            title="Toggle system diagnostic details"
-          >
-            <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${showDiagnostics ? 'rotate-180' : ''}`} />
-          </button>
-        </div>
-      </div>
+        </header>
 
       {/* Expandable Diagnostic Cards */}
       {showDiagnostics && (
@@ -1009,6 +1051,61 @@ export default function HomePage() {
       {/* Main Tab Views */}
       {activeTab === 'new-job' && (
         <main className="flex-1 flex flex-col gap-6">
+          {/* 1-Click Fast Workflow Presets */}
+          <div className="bg-white rounded-2xl p-3.5 px-4 border border-[#90CAF9]/60 shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-blue-50 border border-blue-200 text-[#0D47A1] flex items-center justify-center shrink-0">
+                <Sparkles className="w-4 h-4 text-[#2196F3]" />
+              </div>
+              <div>
+                <span className="text-xs font-bold text-[#0D47A1] block">1-Click Fast Presets</span>
+                <span className="text-[11px] text-slate-500 font-medium">Auto-configure ratio, cuts &amp; styling in 1 click</span>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+              <button
+                type="button"
+                onClick={() => handleApplyWorkflowPreset('viral_shorts')}
+                className="btn-pressable flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100/80 text-[#0D47A1] border border-blue-200 text-xs font-bold transition-all shadow-2xs"
+                title="9:16 vertical + blurred background + 60s cuts + first-second cover"
+              >
+                <Smartphone className="w-3.5 h-3.5 text-[#2196F3]" />
+                <span>Viral Shorts (60s)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleApplyWorkflowPreset('quick_snaps')}
+                className="btn-pressable flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100/80 text-amber-900 border border-amber-200 text-xs font-bold transition-all shadow-2xs"
+                title="9:16 vertical + blurred background + 30s cuts + first-second cover"
+              >
+                <Zap className="w-3.5 h-3.5 text-amber-600" />
+                <span>Quick Snaps (30s)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleApplyWorkflowPreset('ai_highlights')}
+                className="btn-pressable flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-50 hover:bg-purple-100/80 text-purple-900 border border-purple-200 text-xs font-bold transition-all shadow-2xs"
+                title="9:16 vertical + AI smart scene &amp; speech highlights"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+                <span>AI Highlights</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleApplyWorkflowPreset('feed_square')}
+                className="btn-pressable flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-800 border border-slate-200 text-xs font-bold transition-all shadow-2xs"
+                title="1:1 square canvas + 60s cuts"
+              >
+                <Square className="w-3.5 h-3.5 text-slate-600" />
+                <span>Feed Square (1:1)</span>
+              </button>
+            </div>
+          </div>
+
           {/* Streamlined Step Progress Tracker */}
           <div className="bg-white rounded-2xl p-2.5 border border-[#90CAF9]/60 shadow-xs flex items-center justify-between overflow-x-auto gap-2">
             {[
@@ -1765,6 +1862,152 @@ export default function HomePage() {
                     onRemoveCustomRow={removeCustomRow}
                     onUpdateCustomRow={updateCustomRow}
                   />
+
+                  {/* Thumbnail & First-Second Hook Cover Card */}
+                  <div className="bg-[#F8FAFC] rounded-2xl p-5 border border-[#90CAF9]/80 flex flex-col gap-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center border border-blue-200 shrink-0">
+                          <ImageIcon className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h4 className="text-xs font-bold text-[#0D47A1]">
+                              First-Second Thumbnail / Hook Cover
+                            </h4>
+                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">
+                              Viral Cover
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-slate-500 mt-0.5">
+                            Embed an image (or short clip) into the first second of all clipped video parts so platforms use it as the cover thumbnail.
+                          </p>
+                        </div>
+                      </div>
+
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={thumbnailIntro.enabled}
+                          onChange={(e) =>
+                            setThumbnailIntro((prev) => ({ ...prev, enabled: e.target.checked }))
+                          }
+                          className="sr-only peer"
+                        />
+                        <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                      </label>
+                    </div>
+
+                    {thumbnailIntro.enabled && (
+                      <div className="pt-3 border-t border-slate-200/80 flex flex-col gap-3">
+                        <input
+                          ref={thumbFileInputRef}
+                          type="file"
+                          accept="image/png,image/jpeg,image/webp,image/jpg,video/mp4,video/quicktime,video/webm"
+                          className="hidden"
+                          onChange={handleUploadThumbnailIntro}
+                        />
+
+                        {thumbnailIntro.mediaUrl ? (
+                          <div className="p-3 bg-white rounded-xl border border-blue-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+                            <div className="flex items-center gap-3 min-w-0">
+                              <div className="w-14 h-14 rounded-lg overflow-hidden border border-slate-200 shrink-0 bg-slate-100 relative flex items-center justify-center">
+                                {thumbnailIntro.mediaType === 'video' ? (
+                                  <Film className="w-6 h-6 text-blue-600" />
+                                ) : (
+                                  <img
+                                    src={thumbnailIntro.mediaUrl}
+                                    alt="Thumbnail preview"
+                                    className="w-full h-full object-cover"
+                                  />
+                                )}
+                              </div>
+                              <div className="min-w-0">
+                                <p className="text-xs font-bold text-slate-800 truncate">
+                                  {thumbnailIntro.mediaName || 'Thumbnail Media'}
+                                </p>
+                                <p className="text-[10px] text-emerald-600 font-semibold flex items-center gap-1 mt-0.5">
+                                  <Check className="w-3 h-3" />
+                                  <span>Active as thumbnail in first {thumbnailIntro.durationSeconds}s across all {computedPlan.length} clips</span>
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-2 shrink-0">
+                              <button
+                                type="button"
+                                disabled={isUploadingThumbnailIntro}
+                                onClick={() => thumbFileInputRef.current?.click()}
+                                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 transition-colors"
+                              >
+                                Replace Media
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setThumbnailIntro((prev) => ({
+                                    ...prev,
+                                    mediaUrl: '',
+                                    mediaPath: '',
+                                    mediaName: '',
+                                  }))
+                                }
+                                className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-50 transition-colors"
+                                title="Remove thumbnail media"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={isUploadingThumbnailIntro}
+                            onClick={() => thumbFileInputRef.current?.click()}
+                            className="p-5 rounded-xl border-2 border-dashed border-blue-300 bg-white hover:bg-blue-50/50 hover:border-blue-400 text-center flex flex-col items-center justify-center gap-2 transition-all cursor-pointer group"
+                          >
+                            <div className="w-9 h-9 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center group-hover:scale-105 transition-transform">
+                              <UploadCloud className="w-4 h-4" />
+                            </div>
+                            <div>
+                              <p className="text-xs font-bold text-blue-700">
+                                {isUploadingThumbnailIntro ? 'Uploading Thumbnail...' : 'Click to Upload Thumbnail Image or Video'}
+                              </p>
+                              <p className="text-[10px] text-slate-500 mt-0.5">
+                                Supports PNG, JPG, WEBP, or MP4 (Embedded into the first second of every clip)
+                              </p>
+                            </div>
+                          </button>
+                        )}
+
+                        {/* Thumbnail Duration Presets */}
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1 bg-white p-3 rounded-xl border border-blue-100">
+                          <div>
+                            <span className="text-xs font-bold text-slate-700 block">Thumbnail Display Duration</span>
+                            <span className="text-[10px] text-slate-500">How long the thumbnail image remains visible before the video plays</span>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            {[0.5, 1.0, 1.5, 2.0].map((sec) => (
+                              <button
+                                key={sec}
+                                type="button"
+                                onClick={() =>
+                                  setThumbnailIntro((prev) => ({ ...prev, durationSeconds: sec }))
+                                }
+                                className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${
+                                  thumbnailIntro.durationSeconds === sec
+                                    ? 'bg-blue-600 text-white border-blue-600 font-bold'
+                                    : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                                }`}
+                              >
+                                {sec}s{sec === 1.0 ? ' (First Second)' : ''}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
 
@@ -2022,6 +2265,15 @@ export default function HomePage() {
                         <span className="text-[10px] text-slate-500 block">Estimated Size</span>
                         <span className="font-bold text-[#0D47A1]">~{((uploadedVideo?.sizeBytes || 100 * 1024 * 1024) / (1024 * 1024)).toFixed(0)} MB</span>
                       </div>
+                      {thumbnailIntro.enabled && thumbnailIntro.mediaUrl && (
+                        <div className="col-span-2 sm:col-span-4 pt-2 border-t border-blue-200/60 flex items-center justify-between text-xs">
+                          <span className="text-[10px] text-slate-500">Thumbnail Cover:</span>
+                          <span className="font-bold text-emerald-700 flex items-center gap-1">
+                            <Check className="w-3 h-3" />
+                            <span>Embedded in first {thumbnailIntro.durationSeconds}s ({thumbnailIntro.mediaName || 'Thumbnail'})</span>
+                          </span>
+                        </div>
+                      )}
                     </div>
 
                     {submitError && (
@@ -2302,6 +2554,9 @@ export default function HomePage() {
           onOpenMediaLibrary={() => setActiveTab('media-library')}
         />
       )}
+
+      {/* Screen 3.6: Multi-Channel Auto-Pilot Pipelines */}
+      {activeTab === 'omni-pipelines' && <OmniPipelineManagerView />}
 
       {/* Screen 3.8: Master Visual Scheduling Calendar (5 Golden Slots) */}
       {activeTab === 'calendar' && <VisualCalendarView />}

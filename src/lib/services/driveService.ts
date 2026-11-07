@@ -435,6 +435,84 @@ export class DriveService {
 
     throw lastError || new Error(`Upload failed after ${maxAttempts} attempts.`);
   }
+  /**
+   * Lists video files inside a specific Drive folder
+   */
+  public async listFolderVideos(folderId: string): Promise<Array<{ id: string; name: string; sizeBytes?: number; webViewLink?: string }>> {
+    const drive = await this.getAuthenticatedDrive();
+    if (!drive) throw new Error('Google Drive is not authenticated.');
+
+    const query = `'${folderId}' in parents and trashed = false and (mimeType contains 'video/' or name contains '.mp4')`;
+    const res = await drive.files.list({
+      q: query,
+      fields: 'files(id, name, size, webViewLink, createdTime)',
+      orderBy: 'createdTime asc',
+      pageSize: 100,
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
+    });
+
+    return (res.data.files || []).map((f) => ({
+      id: f.id!,
+      name: f.name || 'video.mp4',
+      sizeBytes: Number(f.size) || 0,
+      webViewLink: f.webViewLink || `https://drive.google.com/file/d/${f.id}/view`,
+    }));
+  }
+
+  /**
+   * Downloads a file from Google Drive to local destination path
+   */
+  public async downloadFile(fileId: string, destPath: string): Promise<void> {
+    const drive = await this.getAuthenticatedDrive();
+    if (!drive) throw new Error('Google Drive is not authenticated.');
+
+    const destDir = path.dirname(destPath);
+    if (!fs.existsSync(destDir)) {
+      fs.mkdirSync(destDir, { recursive: true });
+    }
+
+    const res = await drive.files.get(
+      { fileId, alt: 'media', supportsAllDrives: true },
+      { responseType: 'stream' }
+    );
+
+    return new Promise((resolve, reject) => {
+      const destStream = fs.createWriteStream(destPath);
+      (res.data as any)
+        .pipe(destStream)
+        .on('finish', () => resolve())
+        .on('error', (err: any) => reject(err));
+    });
+  }
+
+  /**
+   * Lists available subfolders inside configured root
+   */
+  public async listSubfolders(parentFolderId?: string): Promise<Array<{ id: string; name: string }>> {
+    const drive = await this.getAuthenticatedDrive();
+    if (!drive) return [];
+
+    let targetParent = parentFolderId;
+    if (!targetParent || targetParent === 'root') {
+      const setting = await Setting.findOne();
+      targetParent = setting?.googleDrive?.folderId || config.googleDefaultFolderId || 'root';
+    }
+
+    const query = `'${targetParent}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
+    const res = await drive.files.list({
+      q: query,
+      fields: 'files(id, name)',
+      pageSize: 50,
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
+    });
+
+    return (res.data.files || []).map((f) => ({
+      id: f.id!,
+      name: f.name || 'Folder',
+    }));
+  }
 }
 
 export const driveService = new DriveService();

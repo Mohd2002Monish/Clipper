@@ -1,5 +1,12 @@
 import path from 'path';
 import fs from 'fs';
+import dotenv from 'dotenv';
+
+// Ensure .env.local and .env are loaded for worker processes and CLI
+if (fs.existsSync(path.resolve(process.cwd(), '.env.local'))) {
+  dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
+}
+dotenv.config();
 
 export const config = {
   env: process.env.NODE_ENV || 'development',
