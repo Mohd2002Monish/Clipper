@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="vt_accessibility_desc">VideoTimmer Quick-Clipper automatically extracts captions, hashtags, and share links from Instagram Reels and YouTube Shorts with one tap on the floating clipper icon.</string>
+    <string name="vt_clipper_service_title">VideoTimmer Quick-Clipper Active</string>
+    <string name="vt_clipper_service_desc">Tap the floating icon on Instagram or YouTube Shorts to save clips &amp; captions.</string>
+</resources>
+

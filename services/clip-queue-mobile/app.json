@@ -2,6 +2,7 @@
   "expo": {
     "name": "Clip Ingest",
     "slug": "videotimmer",
+    "owner": "mohd4monishs-team",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -42,11 +43,12 @@
         {
           "package": "com.mohd4monish.videotimmer"
         }
-      ]
+      ],
+      "./plugins/withInstagramClipper.js"
     ],
     "extra": {
       "eas": {
-        "projectId": "b0a2a8a8-43a5-4237-a6d5-0642db611990"
+        "projectId": "76f66686-a54d-4740-9825-d2c60b4fae52"
       }
     }
   }

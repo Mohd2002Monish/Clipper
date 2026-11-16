@@ -2,6 +2,7 @@ export interface DriveFolder {
   id: string;
   name: string;
   parentPath?: string;
+  isLocal?: boolean;
 }
 
 export interface ClipQueueItem {
@@ -23,7 +24,9 @@ export interface ClipQueueItem {
   };
   driveDetails?: {
     webViewLink?: string;
+    webContentLink?: string;
     fileName?: string;
+    fileId?: string;
   };
   createdAt: string;
 }

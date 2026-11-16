@@ -72,6 +72,7 @@ import { ClipIngestQueueView } from '@/components/ClipIngestQueueView';
 import { VisualCalendarView } from '@/components/VisualCalendarView';
 import { VaultLeadManagerView } from '@/components/VaultLeadManagerView';
 import { OmniPipelineManagerView } from '@/components/OmniPipelineManagerView';
+import { AiVideoScoutView } from '@/components/AiVideoScoutView';
 import { VideoProbeData, IJob } from '@/shared/types';
 import { PartPlan, TextOverlaySettings } from '@/shared/schemas';
 import { CustomSelect } from '@/components/ui/CustomSelect';
@@ -2408,6 +2409,13 @@ export default function HomePage() {
             </div>
           </div>
         </main>
+      )}
+
+      {/* Screen 1.4: AI Video Scout & Autonomous Subtitle Autopilot */}
+      {activeTab === 'ai-scout' && (
+        <div className="flex-1">
+          <AiVideoScoutView />
+        </div>
       )}
 
       {/* Screen 1.5: Mobile Phone Clip Ingestion Hub, Table & Leads */}

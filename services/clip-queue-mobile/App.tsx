@@ -14,18 +14,30 @@ import {
   ScrollView,
   FlatList,
   AppState,
+  NativeModules,
+  Platform,
+  Switch,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
 import * as ExpoLinking from 'expo-linking';
 import { useShareIntent } from 'expo-share-intent';
 import { Ionicons } from '@expo/vector-icons';
+import { Video, ResizeMode, Audio } from 'expo-av';
+import * as FileSystem from 'expo-file-system';
 import { ApiService } from './src/services/api';
 import { DriveFolder, ClipQueueItem, WorkerHeartbeatStatus } from './src/types';
 
 const STORAGE_SERVER_URL_KEY = '@clip_queue_server_url';
 const STORAGE_INSTANT_INGEST_KEY = '@clip_queue_instant_ingest';
+const STORAGE_LOCAL_DOWNLOADS_KEY = '@clip_queue_local_downloads';
 const DEFAULT_SERVER_URL = 'https://clip-queue-server.vercel.app';
+
+const LOCAL_STORAGE_FOLDER: DriveFolder = {
+  id: 'local',
+  name: 'Local Storage',
+  isLocal: true,
+};
 
 export default function App() {
   const [serverUrl, setServerUrl] = useState<string>(DEFAULT_SERVER_URL);
@@ -42,18 +54,26 @@ export default function App() {
   const [detectedBatchUrls, setDetectedBatchUrls] = useState<string[]>([]);
   const [noteInput, setNoteInput] = useState<string>('');
 
-  // Drive Folders state
+  // Destination Folders & Storage state
   const [folders, setFolders] = useState<DriveFolder[]>([
+    LOCAL_STORAGE_FOLDER,
     { id: 'Shorts', name: 'Shorts' },
     { id: 'General', name: 'General' },
     { id: 'GTA-5', name: 'GTA-5' },
     { id: 'Movie-Vault', name: 'Movie-Vault' },
   ]);
-  const [selectedFolder, setSelectedFolder] = useState<DriveFolder>({
-    id: 'Shorts',
-    name: 'Shorts',
-  });
+  const [selectedFolder, setSelectedFolder] = useState<DriveFolder>(LOCAL_STORAGE_FOLDER);
   const [isFolderPickerOpen, setIsFolderPickerOpen] = useState<boolean>(false);
+
+  // Local Storage Downloads & In-App Video Playback state
+  const [localDownloads, setLocalDownloads] = useState<Record<string, string>>({});
+  const [downloadingIds, setDownloadingIds] = useState<Record<string, number>>({});
+  const [activePlayingVideo, setActivePlayingVideo] = useState<{
+    uri: string;
+    title: string;
+    isLocal: boolean;
+  } | null>(null);
+  const videoPlayerRef = useRef<Video>(null);
 
   // Live status & Queue state
   const [queueItems, setQueueItems] = useState<ClipQueueItem[]>([]);
@@ -62,6 +82,83 @@ export default function App() {
   const [serverConnected, setServerConnected] = useState<boolean>(false);
   const [macHeartbeat, setMacHeartbeat] = useState<WorkerHeartbeatStatus>({ isOnline: false });
   const [successNotice, setSuccessNotice] = useState<string | null>(null);
+
+  // Native Floating Clipper Module reference
+  const FloatingClipperBridge = NativeModules.FloatingClipperBridge;
+
+  // Floating Clipper state
+  const [isFloatingClipperRunning, setIsFloatingClipperRunning] = useState<boolean>(false);
+  const [isOverlayGranted, setIsOverlayGranted] = useState<boolean>(false);
+  const [isAccessibilityGranted, setIsAccessibilityGranted] = useState<boolean>(false);
+  const [isTogglingClipper, setIsTogglingClipper] = useState<boolean>(false);
+
+  const checkFloatingClipperPermissions = useCallback(async () => {
+    if (Platform.OS !== 'android' || !FloatingClipperBridge) return;
+    try {
+      const overlay = await FloatingClipperBridge.isOverlayPermissionGranted();
+      const accessibility = await FloatingClipperBridge.isAccessibilityPermissionGranted();
+      const running = await FloatingClipperBridge.isServiceRunning();
+      setIsOverlayGranted(!!overlay);
+      setIsAccessibilityGranted(!!accessibility);
+      setIsFloatingClipperRunning(!!running);
+    } catch {}
+  }, [FloatingClipperBridge]);
+
+  useEffect(() => {
+    checkFloatingClipperPermissions();
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        checkFloatingClipperPermissions();
+      }
+    });
+    return () => sub.remove();
+  }, [checkFloatingClipperPermissions]);
+
+  const handleToggleFloatingClipper = async () => {
+    if (Platform.OS !== 'android') {
+      Alert.alert(
+        'Android Exclusive Feature',
+        'The floating Instagram bubble overlay is an Android native capability. On iOS, please use the standard Share Sheet (Share -> Clip Ingest).'
+      );
+      return;
+    }
+
+    if (!FloatingClipperBridge) {
+      Alert.alert(
+        'Standalone Build Required',
+        'The floating overlay requires the standalone Android APK. Please build the APK using "eas build -p android" or run "npx expo run:android".'
+      );
+      return;
+    }
+
+    if (!isOverlayGranted) {
+      Alert.alert(
+        'Overlay Permission Required',
+        'Please grant "Display over other apps" permission so the clipper icon can float over Instagram.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Open Settings', onPress: () => FloatingClipperBridge.openOverlaySettings() },
+        ]
+      );
+      return;
+    }
+
+    setIsTogglingClipper(true);
+    try {
+      if (isFloatingClipperRunning) {
+        await FloatingClipperBridge.stopFloatingClipper();
+        setIsFloatingClipperRunning(false);
+      } else {
+        const folderTarget = selectedFolder.id === 'local' ? 'local' : selectedFolder.name;
+        await FloatingClipperBridge.startFloatingClipper(folderTarget, serverUrl);
+        setIsFloatingClipperRunning(true);
+      }
+    } catch (err: any) {
+      Alert.alert('Error', err?.message || 'Failed to toggle floating clipper.');
+    } finally {
+      setIsTogglingClipper(false);
+    }
+  };
 
   // 1. Smart Folder Auto-Routing Helper
   const resolveSmartFolder = useCallback(
@@ -176,18 +273,32 @@ export default function App() {
     }
   }, [hasShareIntent, shareIntent, resetShareIntent, processIncomingText]);
 
-  // 5. Load persisted settings
+  // 5. Load persisted settings & local video storage
   useEffect(() => {
     (async () => {
       try {
-        const [savedUrl, savedInstant] = await Promise.all([
+        const [savedUrl, savedInstant, savedDownloads] = await Promise.all([
           AsyncStorage.getItem(STORAGE_SERVER_URL_KEY),
           AsyncStorage.getItem(STORAGE_INSTANT_INGEST_KEY),
+          AsyncStorage.getItem(STORAGE_LOCAL_DOWNLOADS_KEY),
         ]);
         if (savedUrl) setServerUrl(savedUrl);
         if (savedInstant !== null) setInstantIngestEnabled(savedInstant === 'true');
+        if (savedDownloads) {
+          try {
+            setLocalDownloads(JSON.parse(savedDownloads));
+          } catch {}
+        }
       } catch {}
     })();
+
+    // Configure audio mode for in-app video playback
+    Audio.setAudioModeAsync({
+      allowsRecordingIOS: false,
+      playsInSilentModeIOS: true,
+      staysActiveInBackground: false,
+      shouldDuckAndroid: true,
+    }).catch(() => {});
   }, []);
 
   // 6. Fetch Drive folders, Queue & Mac Heartbeat
@@ -201,9 +312,9 @@ export default function App() {
         ApiService.fetchWorkerHeartbeat(serverUrl).catch(() => ({ isOnline: false })),
       ]);
 
-      if (fetchedFolders.length > 0) {
-        setFolders(fetchedFolders);
-      }
+      const filteredDriveFolders = fetchedFolders.filter((f) => f.id !== 'local');
+      setFolders([LOCAL_STORAGE_FOLDER, ...filteredDriveFolders]);
+
       setQueueItems(fetchedQueue);
       setMacHeartbeat(heartbeat);
       setServerConnected(true);
@@ -360,6 +471,72 @@ export default function App() {
     setServerUrl(trimmed);
     setIsSettingsOpen(false);
     setTimeout(refreshData, 500);
+  };
+
+  // 12. Local Video Download Engine (expo-file-system)
+  const handleDownloadToLocal = async (item: ClipQueueItem) => {
+    // Determine downloadable URL: prioritize Google Drive direct download, then clean URL
+    let downloadUrl = item.driveDetails?.webContentLink;
+    if (!downloadUrl && item.driveDetails?.fileId) {
+      downloadUrl = `https://drive.google.com/uc?export=download&id=${item.driveDetails.fileId}`;
+    }
+    if (!downloadUrl) {
+      downloadUrl = item.url;
+    }
+
+    if (!downloadUrl) {
+      Alert.alert('Download Unavailable', 'Video file is still processing on worker. Please try again shortly.');
+      return;
+    }
+
+    try {
+      setDownloadingIds((prev) => ({ ...prev, [item._id]: 1 }));
+      const clipsDir = `${FileSystem.documentDirectory}clips/`;
+      const dirInfo = await FileSystem.getInfoAsync(clipsDir);
+      if (!dirInfo.exists) {
+        await FileSystem.makeDirectoryAsync(clipsDir, { intermediates: true });
+      }
+
+      const safeBaseName = (item.driveDetails?.fileName || item.contentMeta?.title || item._id)
+        .replace(/[^a-zA-Z0-9_-]/g, '_')
+        .slice(0, 36);
+      const localFileUri = `${clipsDir}${safeBaseName}_${item._id.slice(-6)}.mp4`;
+
+      const downloadResumable = FileSystem.createDownloadResumable(
+        downloadUrl,
+        localFileUri,
+        {},
+        (progress) => {
+          const total = progress.totalBytesExpectedToWrite;
+          if (total > 0) {
+            const pct = Math.floor((progress.totalBytesWritten / total) * 100);
+            setDownloadingIds((prev) => ({ ...prev, [item._id]: Math.max(1, pct) }));
+          }
+        }
+      );
+
+      const downloadResult = await downloadResumable.downloadAsync();
+      if (downloadResult && downloadResult.uri) {
+        const updated = { ...localDownloads, [item._id]: downloadResult.uri };
+        setLocalDownloads(updated);
+        await AsyncStorage.setItem(STORAGE_LOCAL_DOWNLOADS_KEY, JSON.stringify(updated));
+        setSuccessNotice(`Saved "${item.contentMeta?.title || 'Video'}" to local storage.`);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      Alert.alert('Download Failed', `Could not download to local storage: ${msg}`);
+    } finally {
+      setDownloadingIds((prev) => {
+        const copy = { ...prev };
+        delete copy[item._id];
+        return copy;
+      });
+    }
+  };
+
+  // 13. Play Video in Local Offline Player
+  const handlePlayVideo = (uri: string, title: string, isLocal: boolean) => {
+    setActivePlayingVideo({ uri, title, isLocal });
   };
 
   // Detect platform
@@ -538,6 +715,67 @@ export default function App() {
           </View>
         )}
 
+        {/* Android Floating Instagram Clipper Card */}
+        <View style={styles.clipperCard}>
+          <View style={styles.clipperHeaderRow}>
+            <View style={styles.clipperIconWrap}>
+              <Ionicons name="film" size={18} color="#0284c7" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.clipperTitle}>Social Floating Quick-Clipper</Text>
+              <Text style={styles.clipperSub}>
+                1-tap icon over Instagram Reels &amp; YouTube Shorts to save link, caption &amp; hashtags
+              </Text>
+            </View>
+            <Switch
+              value={isFloatingClipperRunning}
+              onValueChange={handleToggleFloatingClipper}
+              trackColor={{ false: '#cbd5e1', true: '#38bdf8' }}
+              thumbColor={isFloatingClipperRunning ? '#0284c7' : '#f8fafc'}
+              disabled={isTogglingClipper}
+            />
+          </View>
+
+          {/* Permission badge and setup trigger */}
+          <View style={styles.clipperPermContainer}>
+            <View style={[styles.clipperPermBadge, isOverlayGranted ? styles.permGranted : styles.permMissing]}>
+              <Ionicons
+                name={isOverlayGranted ? "checkmark-circle" : "alert-circle"}
+                size={14}
+                color={isOverlayGranted ? "#16a34a" : "#dc2626"}
+              />
+              <Text style={[styles.clipperPermText, { color: isOverlayGranted ? "#15803d" : "#b91c1c" }]}>
+                {isOverlayGranted ? "Overlay Permission Active" : "Display Over Other Apps Missing"}
+              </Text>
+              {!isOverlayGranted && Platform.OS === 'android' && (
+                <TouchableOpacity
+                  onPress={() => FloatingClipperBridge?.openOverlaySettings()}
+                  style={styles.permActionBtn}
+                >
+                  <Text style={styles.permActionText}>Grant</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+
+          {/* Quick Target Folder / Destination Pill */}
+          <View style={styles.clipperFooterRow}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Ionicons
+                name={selectedFolder.id === 'local' ? "phone-portrait-outline" : "folder-outline"}
+                size={14}
+                color="#0369a1"
+              />
+              <Text style={styles.clipperFooterLabel}>
+                Destination: <Text style={{ fontWeight: '700', color: '#0369a1' }}>{selectedFolder.name}</Text>
+              </Text>
+            </View>
+            <TouchableOpacity onPress={() => setIsFolderPickerOpen(true)}>
+              <Text style={styles.clipperChangeFolderText}>Change</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
         {/* Action Card */}
         <View style={styles.card}>
           <View style={styles.cardHeaderRow}>
@@ -611,10 +849,10 @@ export default function App() {
             )}
           </View>
 
-          {/* 1-Tap Target Folder Chips */}
+          {/* 1-Tap Destination Chips */}
           <View style={styles.folderSection}>
             <View style={styles.folderSectionHeader}>
-              <Text style={styles.folderSectionLabel}>Target Drive Folder:</Text>
+              <Text style={styles.folderSectionLabel}>Destination (Drive / Local):</Text>
               <TouchableOpacity onPress={() => setIsFolderPickerOpen(true)} style={styles.allFoldersBtn}>
                 <Text style={styles.allFoldersBtnText}>More ({folders.length})</Text>
                 <Ionicons name="chevron-forward" size={12} color="#0284c7" />
@@ -624,6 +862,7 @@ export default function App() {
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.folderChipsRow}>
               {folders.map((f) => {
                 const isSelected = selectedFolder.id === f.id || selectedFolder.name === f.name;
+                const isLocal = f.id === 'local';
                 return (
                   <TouchableOpacity
                     key={f.id}
@@ -634,9 +873,15 @@ export default function App() {
                     style={[styles.folderChip, isSelected && styles.folderChipActive]}
                   >
                     <Ionicons
-                      name={isSelected ? 'checkmark-circle' : 'folder-outline'}
+                      name={
+                        isSelected
+                          ? 'checkmark-circle'
+                          : isLocal
+                          ? 'phone-portrait-outline'
+                          : 'folder-outline'
+                      }
                       size={14}
-                      color={isSelected ? '#ffffff' : '#475569'}
+                      color={isSelected ? '#ffffff' : isLocal ? '#0284c7' : '#475569'}
                     />
                     <Text style={[styles.folderChipText, isSelected && styles.folderChipTextActive]}>
                       {f.name}
@@ -699,46 +944,103 @@ export default function App() {
             <Ionicons name="folder-open-outline" size={36} color="#cbd5e1" />
             <Text style={styles.emptyText}>No clips in queue</Text>
             <Text style={styles.emptySubtext}>
-              Share a video link from YouTube or Instagram to queue downloads to your Google Drive.
+              Share a video link from YouTube or Instagram to stage downloads to Drive or Local Storage.
             </Text>
           </View>
         ) : (
-          queueItems.map((item) => (
-            <View key={item._id} style={styles.queueCard}>
-              <View style={styles.queueCardLeft}>
-                {getPlatformIcon(item.platform)}
-                <View style={{ flex: 1, marginLeft: 10 }}>
-                  <Text style={styles.queueCardTitle} numberOfLines={1}>
-                    {item.contentMeta?.title || item.driveDetails?.fileName || item.cleanUrl}
-                  </Text>
-                  <View style={styles.queueCardSubRow}>
-                    <Text style={styles.queueCardFolder} numberOfLines={1}>
-                      Folder: {item.targetFolder?.folderName || 'General'}
+          queueItems.map((item) => {
+            const isLocalDownloaded = !!localDownloads[item._id];
+            const isDownloading = downloadingIds[item._id] !== undefined;
+            const downloadPct = downloadingIds[item._id] || 0;
+            const isLocalTarget = item.targetFolder?.folderId === 'local' || item.targetFolder?.folderName === 'Local Storage';
+
+            return (
+              <View key={item._id} style={styles.queueCard}>
+                <View style={styles.queueCardLeft}>
+                  {getPlatformIcon(item.platform)}
+                  <View style={{ flex: 1, marginLeft: 10 }}>
+                    <Text style={styles.queueCardTitle} numberOfLines={1}>
+                      {item.contentMeta?.title || item.driveDetails?.fileName || item.cleanUrl}
                     </Text>
-                    {item.contentMeta?.notes ? (
-                      <View style={styles.queueNotePill}>
-                        <Text style={styles.queueNoteText} numberOfLines={1}>
-                          {item.contentMeta.notes}
+                    <View style={styles.queueCardSubRow}>
+                      <View style={styles.folderPill}>
+                        <Ionicons
+                          name={isLocalTarget ? "phone-portrait-outline" : "folder-outline"}
+                          size={11}
+                          color="#0284c7"
+                        />
+                        <Text style={styles.queueCardFolder} numberOfLines={1}>
+                          {item.targetFolder?.folderName || 'General'}
                         </Text>
                       </View>
-                    ) : null}
+
+                      {isLocalDownloaded && (
+                        <View style={styles.downloadedPill}>
+                          <Ionicons name="checkmark-circle" size={11} color="#15803d" />
+                          <Text style={styles.downloadedPillText}>On Device</Text>
+                        </View>
+                      )}
+
+                      {item.contentMeta?.notes ? (
+                        <View style={styles.queueNotePill}>
+                          <Text style={styles.queueNoteText} numberOfLines={1}>
+                            {item.contentMeta.notes}
+                          </Text>
+                        </View>
+                      ) : null}
+                    </View>
                   </View>
                 </View>
-              </View>
 
-              <View style={styles.queueCardRight}>
-                {renderStatusBadge(item.status)}
-                {item.driveDetails?.webViewLink && (
-                  <TouchableOpacity
-                    style={styles.driveLinkBtn}
-                    onPress={() => Linking.openURL(item.driveDetails!.webViewLink!)}
-                  >
-                    <Ionicons name="open-outline" size={16} color="#0284c7" />
-                  </TouchableOpacity>
-                )}
+                <View style={styles.queueCardRight}>
+                  {renderStatusBadge(item.status)}
+
+                  {/* If saved locally on phone, show Play button */}
+                  {isLocalDownloaded ? (
+                    <TouchableOpacity
+                      style={styles.playLocalBtn}
+                      onPress={() =>
+                        handlePlayVideo(
+                          localDownloads[item._id],
+                          item.contentMeta?.title || item.driveDetails?.fileName || 'Local Video',
+                          true
+                        )
+                      }
+                    >
+                      <Ionicons name="play" size={13} color="#ffffff" />
+                      <Text style={styles.playLocalBtnText}>Play</Text>
+                    </TouchableOpacity>
+                  ) : isDownloading ? (
+                    <View style={styles.downloadingPill}>
+                      <ActivityIndicator size="small" color="#0284c7" />
+                      <Text style={styles.downloadingPctText}>{downloadPct}%</Text>
+                    </View>
+                  ) : (
+                    /* If completed, allow downloading directly to local storage */
+                    item.status === 'completed' && (
+                      <TouchableOpacity
+                        style={styles.downloadLocalBtn}
+                        onPress={() => handleDownloadToLocal(item)}
+                      >
+                        <Ionicons name="cloud-download-outline" size={14} color="#0284c7" />
+                        <Text style={styles.downloadLocalBtnText}>Local</Text>
+                      </TouchableOpacity>
+                    )
+                  )}
+
+                  {/* Drive Link Button */}
+                  {item.driveDetails?.webViewLink && (
+                    <TouchableOpacity
+                      style={styles.driveLinkBtn}
+                      onPress={() => Linking.openURL(item.driveDetails!.webViewLink!)}
+                    >
+                      <Ionicons name="open-outline" size={15} color="#0284c7" />
+                    </TouchableOpacity>
+                  )}
+                </View>
               </View>
-            </View>
-          ))
+            );
+          })
         )}
       </ScrollView>
 
@@ -790,21 +1092,22 @@ export default function App() {
         </View>
       </Modal>
 
-      {/* Folder Picker Modal */}
+      {/* Destination Picker Modal */}
       <Modal visible={isFolderPickerOpen} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
-            <Text style={styles.modalTitle}>Select Destination Drive Folder</Text>
+            <Text style={styles.modalTitle}>Select Destination</Text>
             <Text style={styles.modalSub}>
-              Videos will be downloaded and staged in this folder on your Google Drive.
+              Choose whether to stage videos in Google Drive folders or download locally to device storage.
             </Text>
 
             <FlatList
               data={folders}
               keyExtractor={(f) => f.id}
-              style={{ maxHeight: 280 }}
+              style={{ maxHeight: 300 }}
               renderItem={({ item }) => {
                 const isSelected = selectedFolder.id === item.id;
+                const isLocal = item.id === 'local';
                 return (
                   <TouchableOpacity
                     style={[styles.folderItem, isSelected && styles.folderItemSelected]}
@@ -815,13 +1118,26 @@ export default function App() {
                     }}
                   >
                     <Ionicons
-                      name={isSelected ? 'checkmark-circle' : 'folder-outline'}
+                      name={
+                        isSelected
+                          ? 'checkmark-circle'
+                          : isLocal
+                          ? 'phone-portrait-outline'
+                          : 'folder-outline'
+                      }
                       size={20}
-                      color={isSelected ? '#0284c7' : '#64748b'}
+                      color={isSelected ? '#0284c7' : isLocal ? '#0369a1' : '#64748b'}
                     />
-                    <Text style={[styles.folderItemText, isSelected && styles.folderItemTextSelected]}>
-                      {item.name}
-                    </Text>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.folderItemText, isSelected && styles.folderItemTextSelected]}>
+                        {item.name}
+                      </Text>
+                      {isLocal && (
+                        <Text style={styles.localFolderSubtext}>
+                          Direct download to phone and watch offline inside app
+                        </Text>
+                      )}
+                    </View>
                   </TouchableOpacity>
                 );
               }}
@@ -831,6 +1147,52 @@ export default function App() {
               <Text style={styles.closeModalBtnText}>Close</Text>
             </TouchableOpacity>
           </View>
+        </View>
+      </Modal>
+
+      {/* In-App Offline Video Player Modal */}
+      <Modal
+        visible={!!activePlayingVideo}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setActivePlayingVideo(null)}
+      >
+        <View style={styles.videoModalOverlay}>
+          <SafeAreaView style={styles.videoPlayerContainer}>
+            {/* Header */}
+            <View style={styles.videoModalHeader}>
+              <View style={{ flex: 1, marginRight: 12 }}>
+                <Text style={styles.videoModalTitle} numberOfLines={1}>
+                  {activePlayingVideo?.title || 'Video Player'}
+                </Text>
+                <View style={styles.videoStorageBadge}>
+                  <Ionicons name="phone-portrait-outline" size={12} color="#38bdf8" />
+                  <Text style={styles.videoStorageBadgeText}>Local Offline Playback</Text>
+                </View>
+              </View>
+              <TouchableOpacity
+                style={styles.videoCloseBtn}
+                onPress={() => setActivePlayingVideo(null)}
+              >
+                <Ionicons name="close" size={22} color="#ffffff" />
+              </TouchableOpacity>
+            </View>
+
+            {/* Video Player */}
+            {activePlayingVideo && (
+              <View style={styles.videoPlayerWrap}>
+                <Video
+                  ref={videoPlayerRef}
+                  source={{ uri: activePlayingVideo.uri }}
+                  style={styles.videoPlayer}
+                  useNativeControls
+                  resizeMode={ResizeMode.CONTAIN}
+                  isLooping
+                  shouldPlay
+                />
+              </View>
+            )}
+          </SafeAreaView>
         </View>
       </Modal>
     </SafeAreaView>
@@ -1416,5 +1778,225 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     color: '#64748b',
+  },
+  clipperCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#bae6fd',
+    marginBottom: 16,
+    shadowColor: '#0284c7',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  clipperHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  clipperIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: '#f0f9ff',
+    borderWidth: 1,
+    borderColor: '#e0f2fe',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  clipperTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#0369a1',
+  },
+  clipperSub: {
+    fontSize: 11,
+    color: '#64748b',
+    marginTop: 2,
+    lineHeight: 15,
+  },
+  clipperPermContainer: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 14,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#f1f5f9',
+  },
+  clipperPermBadge: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  permGranted: {
+    backgroundColor: '#f0fdf4',
+    borderColor: '#bbf7d0',
+  },
+  permMissing: {
+    backgroundColor: '#fef2f2',
+    borderColor: '#fecaca',
+  },
+  clipperPermText: {
+    fontSize: 10,
+    fontWeight: '700',
+    flex: 1,
+    marginLeft: 4,
+  },
+  permActionBtn: {
+    backgroundColor: '#dc2626',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  permActionText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#ffffff',
+  },
+  clipperFooterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#f8fafc',
+  },
+  clipperFooterLabel: {
+    fontSize: 11,
+    color: '#475569',
+  },
+  clipperChangeFolderText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#0284c7',
+  },
+  playLocalBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#16a34a',
+    paddingVertical: 5,
+    paddingHorizontal: 9,
+    borderRadius: 8,
+  },
+  playLocalBtnText: {
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  downloadLocalBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: '#f0f9ff',
+    borderWidth: 1,
+    borderColor: '#bae6fd',
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+  },
+  downloadLocalBtnText: {
+    color: '#0284c7',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  downloadingPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#f0f9ff',
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+  },
+  downloadingPctText: {
+    fontSize: 11,
+    color: '#0284c7',
+    fontWeight: '700',
+  },
+  folderPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+  downloadedPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    backgroundColor: '#f0fdf4',
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 4,
+  },
+  downloadedPillText: {
+    fontSize: 10,
+    color: '#15803d',
+    fontWeight: '700',
+  },
+  localFolderSubtext: {
+    fontSize: 11,
+    color: '#64748b',
+    marginTop: 2,
+    lineHeight: 14,
+  },
+  videoModalOverlay: {
+    flex: 1,
+    backgroundColor: '#000000',
+  },
+  videoPlayerContainer: {
+    flex: 1,
+  },
+  videoModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1e293b',
+    backgroundColor: '#0b0f19',
+  },
+  videoModalTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#ffffff',
+  },
+  videoStorageBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 2,
+  },
+  videoStorageBadgeText: {
+    fontSize: 11,
+    color: '#38bdf8',
+    fontWeight: '600',
+  },
+  videoCloseBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#1e293b',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  videoPlayerWrap: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#000000',
+  },
+  videoPlayer: {
+    width: '100%',
+    height: '100%',
   },
 });

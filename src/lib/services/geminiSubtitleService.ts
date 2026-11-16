@@ -263,6 +263,69 @@ Respond ONLY with the JSON array in the format: [{"start": 0.0, "end": 2.5, "tex
       }
     }
   }
+
+  /**
+   * Hardcodes/burns subtitles onto a video using FFmpeg with customized styling
+   */
+  public async burnSubtitlesToVideo(
+    inputVideoPath: string,
+    subtitles: SubtitleItem[],
+    outputVideoPath: string,
+    style: 'viral_yellow' | 'classic_white' | 'karaoke_glow' = 'viral_yellow'
+  ): Promise<string> {
+    if (!subtitles || subtitles.length === 0) {
+      return inputVideoPath;
+    }
+
+    const srtTempPath = path.join(
+      config.workDir,
+      `temp_sub_${Date.now()}_${Math.random().toString(36).substring(7)}.srt`
+    );
+
+    try {
+      this.writeSrtFile(subtitles, srtTempPath);
+
+      // Color codes in ASS format: &HAABBGGRR (Alpha, Blue, Green, Red)
+      let forceStyle = '';
+      if (style === 'viral_yellow') {
+        // Vibrant Yellow text (&H0000FFFF), pure black bold border, centered bottom
+        forceStyle =
+          'Fontname=Arial,Fontsize=22,Bold=1,PrimaryColour=&H0000FFFF,OutlineColour=&H00000000,BorderStyle=3,Outline=3,Shadow=1,Alignment=2,MarginV=42';
+      } else if (style === 'karaoke_glow') {
+        // Bright Gold/Orange text (&H0000D7FF), thick black outline
+        forceStyle =
+          'Fontname=Arial,Fontsize=23,Bold=1,PrimaryColour=&H0000D7FF,OutlineColour=&H00000000,BorderStyle=3,Outline=4,Shadow=2,Alignment=2,MarginV=45';
+      } else {
+        // Classic White text, crisp outline
+        forceStyle =
+          'Fontname=Arial,Fontsize=21,Bold=1,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=2,Shadow=1,Alignment=2,MarginV=38';
+      }
+
+      fs.mkdirSync(path.dirname(outputVideoPath), { recursive: true });
+
+      // Escape srt path for FFmpeg filter on Unix/macOS/Windows
+      const escapedSrt = srtTempPath.replace(/\\/g, '/').replace(/:/g, '\\:');
+      const cmd = `"${config.ffmpegPath}" -y -i "${inputVideoPath}" -vf "subtitles='${escapedSrt}':force_style='${forceStyle}'" -c:a copy "${outputVideoPath}"`;
+
+      logger.system('info', 'GEMINI_SUBTITLE_BURN_START', `Burning dynamic subtitles into ${path.basename(outputVideoPath)} with style [${style}]`);
+      await execAsync(cmd);
+
+      if (fs.existsSync(outputVideoPath)) {
+        return outputVideoPath;
+      }
+      return inputVideoPath;
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.system('warn', 'GEMINI_SUBTITLE_BURN_ERROR', `Failed to burn subtitles: ${msg}. Falling back to source video.`);
+      return inputVideoPath;
+    } finally {
+      if (fs.existsSync(srtTempPath)) {
+        try {
+          fs.unlinkSync(srtTempPath);
+        } catch {}
+      }
+    }
+  }
 }
 
 export const geminiSubtitleService = new GeminiSubtitleService();

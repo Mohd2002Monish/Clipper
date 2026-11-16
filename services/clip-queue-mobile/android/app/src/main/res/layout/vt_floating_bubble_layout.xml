@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/vt_bubble_root"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:padding="6dp">
+
+    <FrameLayout
+        android:id="@+id/vt_bubble_circle"
+        android:layout_width="56dp"
+        android:layout_height="56dp"
+        android:background="@drawable/vt_bubble_bg"
+        android:elevation="14dp">
+
+        <ImageView
+            android:id="@+id/vt_bubble_icon_view"
+            android:layout_width="28dp"
+            android:layout_height="28dp"
+            android:layout_gravity="center"
+            android:src="@drawable/vt_bubble_icon"
+            android:contentDescription="VideoTimmer Quick Clipper" />
+
+        <ProgressBar
+            android:id="@+id/vt_bubble_loader"
+            android:layout_width="30dp"
+            android:layout_height="30dp"
+            android:layout_gravity="center"
+            android:visibility="gone"
+            android:indeterminate="true"
+            android:indeterminateTint="#FFFFFF" />
+
+        <ImageView
+            android:id="@+id/vt_bubble_check_view"
+            android:layout_width="30dp"
+            android:layout_height="30dp"
+            android:layout_gravity="center"
+            android:src="@drawable/vt_bubble_check"
+            android:visibility="gone"
+            android:contentDescription="Saved Successfully" />
+
+        <ImageView
+            android:id="@+id/vt_bubble_error_view"
+            android:layout_width="28dp"
+            android:layout_height="28dp"
+            android:layout_gravity="center"
+            android:src="@drawable/vt_bubble_error"
+            android:visibility="gone"
+            android:contentDescription="Save Failed" />
+    </FrameLayout>
+</FrameLayout>

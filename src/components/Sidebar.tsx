@@ -33,10 +33,12 @@ import {
   Users,
   Smartphone,
   HardDrive,
+  Sparkles,
 } from 'lucide-react';
 
 export type TabType =
   | 'new-job'
+  | 'ai-scout'
   | 'clip-ingest'
   | 'app-leads-table'
   | 'app-vault-leads'
@@ -223,6 +225,16 @@ export function Sidebar({
       badge: 'Hub',
       badgeColor: 'bg-sky-500/20 text-sky-300 border border-sky-500/30 font-semibold',
       items: [
+        {
+          id: 'ai-scout',
+          label: 'AI Video Scout',
+          description: 'Autonomous YouTube discovery & subtitles',
+          icon: Sparkles,
+          accent: 'text-indigo-400',
+          badge: 'AI',
+          badgeColor: 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-semibold',
+          activeBg: 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-md shadow-indigo-600/30 font-semibold',
+        },
         {
           id: 'clip-ingest',
           label: 'Ingested Clips Table',

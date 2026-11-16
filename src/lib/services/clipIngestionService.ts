@@ -7,6 +7,7 @@ import { ClipQueue, IClipQueueDocument } from '@/models/ClipQueue';
 import { DriveFolderRegistry } from '@/models/DriveFolderRegistry';
 import { WorkerHeartbeat } from '@/models/WorkerHeartbeat';
 import { driveService } from '@/lib/services/driveService';
+import { geminiSubtitleService } from '@/lib/services/geminiSubtitleService';
 import { Setting } from '@/models/Setting';
 import { logger } from '@/lib/logger/logger';
 import { IdmLogger } from '@/lib/logger/idmLogger';
@@ -264,6 +265,50 @@ export class ClipIngestionService {
       item.contentMeta.durationSeconds = downloadResult.durationSeconds;
       await item.save();
 
+      let finalUploadPath = downloadResult.filePath;
+
+      // 1.5 Auto-generate timestamped subtitles and burn into video if enabled
+      if (item.processingDirectives?.autoCaption) {
+        try {
+          logger.system(
+            'info',
+            'CLIP_INGEST_SUBTITLE_START',
+            `Generating Gemini AI timestamped subtitles for: "${downloadResult.title}"`
+          );
+          const subtitles = await geminiSubtitleService.generateSubtitles(downloadResult.filePath);
+          if (subtitles && subtitles.length > 0) {
+            const burnedOutputPath = path.join(
+              this.tempDir,
+              `captioned_${Date.now()}_${path.basename(downloadResult.filePath)}`
+            );
+            const burnedResult = await geminiSubtitleService.burnSubtitlesToVideo(
+              downloadResult.filePath,
+              subtitles,
+              burnedOutputPath,
+              'viral_yellow'
+            );
+            if (fs.existsSync(burnedResult) && burnedResult !== downloadResult.filePath) {
+              if (fs.existsSync(downloadResult.filePath)) {
+                try { fs.unlinkSync(downloadResult.filePath); } catch {}
+              }
+              finalUploadPath = burnedResult;
+              logger.system(
+                'info',
+                'CLIP_INGEST_SUBTITLE_SUCCESS',
+                `Subtitles successfully burned into video for Drive upload`
+              );
+            }
+          }
+        } catch (subErr: unknown) {
+          const subMsg = subErr instanceof Error ? subErr.message : String(subErr);
+          logger.system(
+            'warn',
+            'CLIP_INGEST_SUBTITLE_FALLBACK',
+            `Auto-subtitles skipped (${subMsg}), proceeding with clean video.`
+          );
+        }
+      }
+
       // 2. Resolve Drive Target Folder ID
       let targetFolderId = item.targetFolder?.folderId;
       const targetFolderName = item.targetFolder?.folderName || 'General';
@@ -294,15 +339,15 @@ export class ClipIngestionService {
       );
 
       const driveRes = await driveService.uploadFile({
-        filePath: downloadResult.filePath,
+        filePath: finalUploadPath,
         filename: cleanSafeFilename,
         folderId: targetFolderId || 'root',
       });
 
       // 4. Cleanup local temp file
-      if (fs.existsSync(downloadResult.filePath)) {
+      if (fs.existsSync(finalUploadPath)) {
         try {
-          fs.unlinkSync(downloadResult.filePath);
+          fs.unlinkSync(finalUploadPath);
         } catch {}
       }
 

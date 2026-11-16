@@ -54,7 +54,7 @@ export interface IClipQueue {
       occurredAt: Date;
     };
     sourceClient?: {
-      type: 'ios_share' | 'android_share' | 'manual_paste' | 'web_ui';
+      type: 'ios_share' | 'android_share' | 'manual_paste' | 'web_ui' | 'ai_video_scout' | 'scheduler';
       deviceInfo?: string;
       appVersion?: string;
     };
