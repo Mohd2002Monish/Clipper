@@ -10,9 +10,6 @@ import {
   RotateCw,
   Clock,
   Maximize,
-  Volume2,
-  VolumeX,
-  Gauge,
   Film,
   FileVideo,
   Zap,
@@ -23,9 +20,15 @@ import {
   RefreshCw,
   ArrowRight,
   ChevronDown,
-  ChevronUp,
   Sliders,
+  FolderSync,
+  Eye,
+  ExternalLink,
+  Sparkles,
+  Download,
 } from 'lucide-react';
+import { CustomSelect, SelectOption } from './ui/CustomSelect';
+import { safeFetchJson } from '@/lib/safeJson';
 import { VideoProbeData } from '@/shared/types';
 
 interface UploadZoneProps {
@@ -49,12 +52,34 @@ interface LocalVideoItem {
   modifiedAt: string;
 }
 
+interface DriveVideoItem {
+  id: string;
+  name: string;
+  sizeBytes: number;
+  sizeFormatted: string;
+  webViewLink: string;
+  thumbnailLink?: string;
+  createdTime: string;
+  durationSec?: number;
+  mimeType?: string;
+}
+
 const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB per chunk
 
 export function UploadZone({ onUploadComplete, onReset, onProceed }: UploadZoneProps) {
-  // Mode: 'local' (0-wait, 0-storage direct path) or 'chunked' (traditional upload)
-  const [uploadMode, setUploadMode] = useState<'local' | 'chunked'>('local');
+  // Mode: 'drive' (Google Drive) | 'local' (Mac quick folders) | 'chunked' (traditional upload)
+  const [uploadMode, setUploadMode] = useState<'drive' | 'local' | 'chunked'>('drive');
   const [showTechDetails, setShowTechDetails] = useState<boolean>(false);
+
+  // Google Drive state
+  const [driveVideos, setDriveVideos] = useState<DriveVideoItem[]>([]);
+  const [driveFolders, setDriveFolders] = useState<SelectOption[]>([]);
+  const [selectedDriveFolder, setSelectedDriveFolder] = useState<string>('default');
+  const [driveSearch, setDriveSearch] = useState<string>('');
+  const [isLoadingDrive, setIsLoadingDrive] = useState<boolean>(false);
+  const [downloadingDriveId, setDownloadingDriveId] = useState<string | null>(null);
+  const [driveDownloadNotice, setDriveDownloadNotice] = useState<string | null>(null);
+  const [driveAuthError, setDriveAuthError] = useState<string | null>(null);
 
   // Local File selection state
   const [localPathInput, setLocalPathInput] = useState<string>('');
@@ -79,6 +104,7 @@ export function UploadZone({ onUploadComplete, onReset, onProceed }: UploadZoneP
     sizeBytes: number;
     probe?: VideoProbeData;
     isDirectLocal?: boolean;
+    isCached?: boolean;
   } | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -86,13 +112,88 @@ export function UploadZone({ onUploadComplete, onReset, onProceed }: UploadZoneP
   const activeUploadIdRef = useRef<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Load videos for active folder preset
+  // Fetch Google Drive videos
+  const fetchDriveVideos = useCallback(async (folderId?: string, search?: string) => {
+    setIsLoadingDrive(true);
+    setDriveAuthError(null);
+    try {
+      const params = new URLSearchParams();
+      if (folderId && folderId !== 'default') params.append('folderId', folderId);
+      if (search && search.trim()) params.append('search', search.trim());
+
+      const res = await fetch(`/api/drive/videos?${params.toString()}`);
+      const { ok, data } = await safeFetchJson<{
+        success: boolean;
+        error?: string;
+        videos?: DriveVideoItem[];
+        folders?: Array<{ id: string; name: string }>;
+      }>(res);
+
+      if (ok && data?.success) {
+        setDriveVideos(data.videos || []);
+        if (data.folders && data.folders.length > 0) {
+          const folderOpts: SelectOption[] = data.folders.map((f) => ({
+            value: f.id,
+            label: f.name,
+            description: f.id === 'root' ? 'Google Drive root directory' : `Folder ID: ${f.id.slice(0, 10)}...`,
+          }));
+          setDriveFolders(folderOpts);
+        }
+      } else {
+        setDriveAuthError(data?.error || 'Could not load Google Drive videos.');
+        setDriveVideos([]);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setDriveAuthError(msg);
+      setDriveVideos([]);
+    } finally {
+      setIsLoadingDrive(false);
+    }
+  }, []);
+
+  // Download video from Google Drive to local cache and probe
+  const handleSelectDriveVideo = async (video: DriveVideoItem) => {
+    try {
+      setErrorMessage(null);
+      setDownloadingDriveId(video.id);
+      setDriveDownloadNotice(`Preparing "${video.name}" from Google Drive...`);
+
+      const res = await fetch('/api/drive/download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileId: video.id, fileName: video.name }),
+      });
+
+      const { ok, data, error } = await safeFetchJson<any>(res);
+      if (!ok || !data?.success) {
+        throw new Error(error || data?.error || 'Failed to download video from Google Drive.');
+      }
+
+      setDriveDownloadNotice(
+        data.isCached
+          ? 'Local cache verified (0s wait). Probing video streams...'
+          : 'Download complete. Probing video streams with ffprobe...'
+      );
+
+      setUploadedData(data);
+      onUploadComplete(data);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setErrorMessage(msg);
+    } finally {
+      setDownloadingDriveId(null);
+      setDriveDownloadNotice(null);
+    }
+  };
+
+  // Load videos for active local folder preset
   const loadFolderVideos = useCallback(async (preset: string) => {
     try {
       setIsLoadingFolder(true);
       const res = await fetch(`/api/fs/quick-browse?folder=${preset}`);
-      const data = await res.json();
-      if (data.success) {
+      const { ok, data } = await safeFetchJson<{ success: boolean; videos?: LocalVideoItem[] }>(res);
+      if (ok && data?.success) {
         setFolderVideos(data.videos || []);
       } else {
         setFolderVideos([]);
@@ -105,10 +206,12 @@ export function UploadZone({ onUploadComplete, onReset, onProceed }: UploadZoneP
   }, []);
 
   useEffect(() => {
-    if (uploadMode === 'local') {
+    if (uploadMode === 'drive') {
+      fetchDriveVideos(selectedDriveFolder, driveSearch);
+    } else if (uploadMode === 'local') {
       loadFolderVideos(activeFolderPreset);
     }
-  }, [uploadMode, activeFolderPreset, loadFolderVideos]);
+  }, [uploadMode, selectedDriveFolder, fetchDriveVideos, loadFolderVideos, activeFolderPreset]);
 
   // Handle probing a direct local path (0s upload wait time, 0 storage duplicate)
   const handleProbeLocalPath = async (targetPath?: string) => {
@@ -128,9 +231,9 @@ export function UploadZone({ onUploadComplete, onReset, onProceed }: UploadZoneP
         body: JSON.stringify({ filePath: pathToProbe }),
       });
 
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to inspect local video file.');
+      const { ok, data, error } = await safeFetchJson<any>(res);
+      if (!ok || !data?.success) {
+        throw new Error(error || data?.error || 'Failed to inspect local video file.');
       }
 
       setUploadedData(data);
@@ -181,17 +284,17 @@ export function UploadZone({ onUploadComplete, onReset, onProceed }: UploadZoneP
         signal: abortController.signal,
       });
 
-      if (!initRes.ok) {
-        const errorData = await initRes.json();
-        throw new Error(errorData.error || 'Failed to initiate upload.');
+      const { ok: initOk, data: initData, error: initErr } = await safeFetchJson<any>(initRes);
+      if (!initOk || !initData?.uploadId) {
+        throw new Error(initErr || initData?.error || 'Failed to initiate upload session.');
       }
 
-      const { uploadId } = await initRes.json();
+      const uploadId = initData.uploadId;
       activeUploadIdRef.current = uploadId;
 
-      // 2. Upload chunks with speed & ETA tracking
+      // 2. Upload chunks with tracking
+      let bytesUploaded = 0;
       const startTime = Date.now();
-      let uploadedBytes = 0;
 
       for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
         if (abortController.signal.aborted) {
@@ -200,12 +303,12 @@ export function UploadZone({ onUploadComplete, onReset, onProceed }: UploadZoneP
 
         const start = chunkIndex * CHUNK_SIZE;
         const end = Math.min(start + CHUNK_SIZE, totalSize);
-        const chunkBlob = file.slice(start, end);
+        const chunk = file.slice(start, end);
 
         const formData = new FormData();
         formData.append('uploadId', uploadId);
-        formData.append('chunkIndex', String(chunkIndex));
-        formData.append('chunk', chunkBlob);
+        formData.append('chunkIndex', chunkIndex.toString());
+        formData.append('chunk', chunk);
 
         const chunkRes = await fetch('/api/upload/chunk', {
           method: 'POST',
@@ -214,25 +317,24 @@ export function UploadZone({ onUploadComplete, onReset, onProceed }: UploadZoneP
         });
 
         if (!chunkRes.ok) {
-          const chunkError = await chunkRes.json();
-          throw new Error(chunkError.error || `Chunk ${chunkIndex} upload failed.`);
+          const { error } = await safeFetchJson<any>(chunkRes);
+          throw new Error(error || `Failed uploading chunk ${chunkIndex + 1}/${totalChunks}`);
         }
 
-        uploadedBytes += end - start;
-        const currentProgress = Math.round((uploadedBytes / totalSize) * 100);
-        setProgress(currentProgress);
+        bytesUploaded += chunk.size;
+        const percent = Math.round((bytesUploaded / totalSize) * 100);
+        setProgress(percent);
 
         const elapsedSec = (Date.now() - startTime) / 1000;
         if (elapsedSec > 0.5) {
-          const currentSpeedMb = uploadedBytes / (1024 * 1024) / elapsedSec;
-          setSpeedMb(parseFloat(currentSpeedMb.toFixed(1)));
-          const remainingBytes = totalSize - uploadedBytes;
-          const remainingSec = Math.round(remainingBytes / (uploadedBytes / elapsedSec));
-          setEtaSec(remainingSec);
+          const currentSpeed = (bytesUploaded / (1024 * 1024)) / elapsedSec;
+          setSpeedMb(Number(currentSpeed.toFixed(1)));
+          const remainingBytes = totalSize - bytesUploaded;
+          setEtaSec(Math.round(remainingBytes / (bytesUploaded / elapsedSec)));
         }
       }
 
-      // 3. Complete and assemble upload
+      // 3. Finalize upload & run probe
       const completeRes = await fetch('/api/upload/complete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -240,22 +342,20 @@ export function UploadZone({ onUploadComplete, onReset, onProceed }: UploadZoneP
         signal: abortController.signal,
       });
 
-      if (!completeRes.ok) {
-        const completeError = await completeRes.json();
-        throw new Error(completeError.error || 'Failed to finalize uploaded file.');
+      const { ok: compOk, data: compData, error: compErr } = await safeFetchJson<any>(completeRes);
+      if (!compOk || !compData?.success) {
+        throw new Error(compErr || compData?.error || 'Failed to assemble video file on server.');
       }
 
-      const completeData = await completeRes.json();
-      setUploadedData(completeData);
-      setUploading(false);
-      onUploadComplete(completeData);
+      setUploadedData(compData);
+      onUploadComplete(compData);
     } catch (err: unknown) {
-      if (abortController.signal.aborted) {
-        return;
-      }
+      if ((err as Error)?.name === 'AbortError') return;
       const msg = err instanceof Error ? err.message : String(err);
       setErrorMessage(msg);
+    } finally {
       setUploading(false);
+      abortControllerRef.current = null;
     }
   };
 
@@ -263,151 +363,144 @@ export function UploadZone({ onUploadComplete, onReset, onProceed }: UploadZoneP
     (e: React.DragEvent) => {
       e.preventDefault();
       setIsDragging(false);
-
-      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-        const file = e.dataTransfer.files[0];
-        // If file has a local path (Electron or local Chrome drag), probe it directly
-        const maybePath = (file as any).path;
-        if (maybePath) {
-          setLocalPathInput(maybePath);
-          handleProbeLocalPath(maybePath);
-        } else {
-          startChunkedUpload(file);
-        }
+      const droppedFiles = Array.from(e.dataTransfer.files);
+      const videoFile = droppedFiles.find((f) => f.type.startsWith('video/') || /\.(mp4|mov|mkv|webm)$/i.test(f.name));
+      if (videoFile) {
+        startChunkedUpload(videoFile);
+      } else {
+        setErrorMessage('Please drop a valid video file (MP4, MOV, MKV, WebM).');
       }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     []
   );
 
-  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      const file = e.target.files[0];
-      const maybePath = (file as any).path;
-      if (maybePath) {
-        setLocalPathInput(maybePath);
-        handleProbeLocalPath(maybePath);
-      } else {
-        startChunkedUpload(file);
-      }
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selected = e.target.files?.[0];
+    if (selected) {
+      startChunkedUpload(selected);
     }
   };
 
-  const cancelUpload = async () => {
+  const handleAbort = async () => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
-    if (activeUploadIdRef.current) {
+    const uploadId = activeUploadIdRef.current;
+    if (uploadId) {
       try {
         await fetch('/api/upload/abort', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ uploadId: activeUploadIdRef.current }),
+          body: JSON.stringify({ uploadId }),
         });
-      } catch {
-        // Ignore abort network error
-      }
+      } catch {}
     }
     setUploading(false);
     setProgress(0);
-    setErrorMessage('Upload cancelled.');
+    setCurrentFile(null);
   };
 
-  const resetUpload = () => {
+  const handleReset = () => {
     setUploadedData(null);
     setCurrentFile(null);
     setProgress(0);
     setErrorMessage(null);
-    setLocalPathInput('');
     if (fileInputRef.current) fileInputRef.current.value = '';
     onReset?.();
   };
 
-  // If already loaded and probed, render the metadata & playable preview inspector
+  // ----------------------------------------------------
+  // VIEW A: PROBED VIDEO RESULT (READY FOR CLIPPING)
+  // ----------------------------------------------------
   if (uploadedData) {
     const probe = uploadedData.probe;
-    const isDirect = !!uploadedData.isDirectLocal;
-    const streamUrl = isDirect
-      ? `/api/video/stream?filePath=${encodeURIComponent(uploadedData.sanitizedFilename)}`
-      : `/api/video/${uploadedData.sanitizedFilename}`;
+    const formatDuration = (seconds?: number) => {
+      if (!seconds || isNaN(seconds)) return '00:00';
+      const mins = Math.floor(seconds / 60);
+      const secs = Math.floor(seconds % 60);
+      return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    };
+
+    const streamVideoUrl = uploadedData.sanitizedFilename
+      ? `/api/video/${uploadedData.uploadId}?filePath=${encodeURIComponent(uploadedData.sanitizedFilename)}`
+      : `/api/video/${uploadedData.uploadId}`;
 
     return (
-      <div className="bg-white rounded-2xl p-6 border border-[#90CAF9]/60 shadow-sm flex flex-col gap-6">
-        <div className="flex items-center justify-between pb-4 border-b border-[#90CAF9]/40">
+      <div className="bg-slate-900/90 rounded-2xl p-6 border border-slate-800 shadow-xl flex flex-col gap-5 backdrop-blur-md">
+        {/* Header with Source Badge & Change Video Button */}
+        <div className="flex items-center justify-between pb-4 border-b border-slate-800">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-300 flex items-center justify-center text-emerald-600 shadow-sm">
+            <div className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
               <CheckCircle2 className="w-5 h-5" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="text-sm font-bold text-[#0D47A1] truncate max-w-md">
-                  {uploadedData.originalFilename}
-                </h3>
-                <span className="text-[10px] font-mono font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-300">
-                  Ready
-                </span>
-                {isDirect && (
-                  <span className="text-[10px] font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-300 flex items-center gap-1">
-                    <Zap className="w-3 h-3 text-amber-600" /> Direct Local (0s Wait &bull; 0 Storage)
+                <h3 className="text-sm font-bold text-white">Video Ready for Clipping</h3>
+                {uploadedData.isCached ? (
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-sky-500/10 text-sky-400 border border-sky-500/20">
+                    Local Cache Hit
+                  </span>
+                ) : uploadedData.isDirectLocal ? (
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                    Local Direct File
+                  </span>
+                ) : (
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/20">
+                    Direct Upload
                   </span>
                 )}
               </div>
-              <p className="text-xs text-slate-500 font-medium mt-0.5 truncate max-w-xl">
-                {(uploadedData.sizeBytes / (1024 * 1024)).toFixed(1)} MB &bull; {uploadedData.sanitizedFilename}
+              <p className="text-xs text-slate-400 font-mono truncate max-w-md mt-0.5">
+                {uploadedData.originalFilename}
               </p>
             </div>
           </div>
+
           <button
-            onClick={resetUpload}
-            className="px-3 py-1.5 rounded-lg text-xs font-semibold text-[#0D47A1] bg-[#E3F2FD] hover:bg-[#90CAF9]/40 border border-[#90CAF9] transition-all flex items-center gap-1.5 shrink-0"
+            type="button"
+            onClick={handleReset}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition-all"
           >
-            <RotateCw className="w-3.5 h-3.5 text-[#2196F3]" />
-            Change Video
+            <RotateCw className="w-3.5 h-3.5" />
+            <span>Select Another Clip</span>
           </button>
         </div>
 
-        {/* Video Player & Probed Facts Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
-          {/* HTML5 Playable Video Preview */}
-          <div className="md:col-span-5 flex flex-col gap-2">
-            <div className="rounded-xl overflow-hidden bg-slate-900 border border-[#90CAF9]/60 aspect-video flex items-center justify-center shadow-md">
-              <video
-                src={streamUrl}
-                controls
-                preload="metadata"
-                className="w-full h-full object-contain"
-              />
-            </div>
-            <p className="text-[10px] text-slate-500 font-medium text-center">
-              Direct source preview &bull; Zero storage overhead
-            </p>
+        {/* Video Player & Probed Specs Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          {/* Video Preview Player */}
+          <div className="lg:col-span-5 bg-slate-950 rounded-xl overflow-hidden border border-slate-800/80 flex items-center justify-center relative min-h-[220px]">
+            <video
+              src={streamVideoUrl}
+              controls
+              playsInline
+              className="w-full max-h-[300px] object-contain"
+            />
           </div>
 
-          {/* Creator-Friendly Facts & Video Stats */}
-          <div className="md:col-span-7 flex flex-col justify-between gap-4">
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div className="bg-[#F0F7FF] p-3.5 rounded-xl border border-[#90CAF9]/60">
-                <p className="text-[10px] uppercase font-bold text-slate-500 flex items-center gap-1.5">
-                  <Clock className="w-3.5 h-3.5 text-[#0288D1]" />
+          {/* Video Specs Breakdown */}
+          <div className="lg:col-span-7 flex flex-col justify-between gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800 flex flex-col gap-1">
+                <span className="text-[10px] uppercase font-bold text-slate-500 flex items-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5 text-sky-400" />
                   Duration
-                </p>
-                <p className="text-base font-extrabold text-[#0D47A1] mt-1">
-                  {probe ? `${Math.floor(probe.duration / 60)}m ${Math.round(probe.duration % 60)}s` : 'N/A'}
-                </p>
-                <p className="text-[10px] text-slate-500 font-mono mt-0.5">
-                  {probe ? `${probe.duration.toFixed(1)}s total` : ''}
-                </p>
+                </span>
+                <span className="text-base font-bold text-white font-mono mt-0.5">
+                  {formatDuration(probe?.duration)}
+                </span>
+                <span className="text-[10px] text-slate-400">Total Playtime</span>
               </div>
 
-              <div className="bg-[#F0F7FF] p-3.5 rounded-xl border border-[#90CAF9]/60">
-                <p className="text-[10px] uppercase font-bold text-slate-500 flex items-center gap-1.5">
-                  <Maximize className="w-3.5 h-3.5 text-[#2196F3]" />
+              <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800 flex flex-col gap-1">
+                <span className="text-[10px] uppercase font-bold text-slate-500 flex items-center gap-1.5">
+                  <Maximize className="w-3.5 h-3.5 text-indigo-400" />
                   Resolution
-                </p>
-                <p className="text-base font-extrabold text-[#0D47A1] mt-1">
+                </span>
+                <span className="text-base font-bold text-white font-mono mt-0.5">
                   {probe ? `${probe.displayWidth}x${probe.displayHeight}` : 'Probing...'}
-                </p>
-                <p className="text-[10px] text-slate-500 font-medium mt-0.5">
+                </span>
+                <span className="text-[10px] text-slate-400">
                   {probe
                     ? probe.displayWidth > probe.displayHeight
                       ? '16:9 Landscape'
@@ -415,64 +508,66 @@ export function UploadZone({ onUploadComplete, onReset, onProceed }: UploadZoneP
                       ? '9:16 Vertical'
                       : '1:1 Square'
                     : ''}
-                </p>
+                </span>
               </div>
 
-              <div className="bg-[#F0F7FF] p-3.5 rounded-xl border border-[#90CAF9]/60">
-                <p className="text-[10px] uppercase font-bold text-slate-500 flex items-center gap-1.5">
-                  <HardDrive className="w-3.5 h-3.5 text-indigo-600" />
+              <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800 flex flex-col gap-1">
+                <span className="text-[10px] uppercase font-bold text-slate-500 flex items-center gap-1.5">
+                  <HardDrive className="w-3.5 h-3.5 text-amber-400" />
                   File Size
-                </p>
-                <p className="text-base font-extrabold text-[#0D47A1] mt-1">
+                </span>
+                <span className="text-base font-bold text-white font-mono mt-0.5">
                   {(uploadedData.sizeBytes / (1024 * 1024)).toFixed(1)} MB
-                </p>
-                <p className="text-[10px] text-emerald-700 font-semibold mt-0.5">
-                  Ready to slice
-                </p>
+                </span>
+                <span className="text-[10px] text-emerald-400 font-semibold">Ready to split</span>
               </div>
             </div>
 
-            {/* Collapsible Technical Video Specs */}
-            <div className="rounded-xl border border-[#90CAF9]/60 bg-[#F8FAFC] overflow-hidden">
+            {/* AI Subtitle & Timestamp Readiness Banner */}
+            <div className="p-3 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center gap-2.5">
+              <Sparkles className="w-4 h-4 text-purple-400 shrink-0" />
+              <div className="text-xs">
+                <span className="font-semibold text-purple-200">AI Subtitle Pipeline Ready: </span>
+                <span className="text-purple-300">
+                  Audio stream is verified locally for exact timestamp extraction and Gemini AI captioning.
+                </span>
+              </div>
+            </div>
+
+            {/* Technical Stream Specs Toggle */}
+            <div className="rounded-xl border border-slate-800 bg-slate-950/40 overflow-hidden">
               <button
                 type="button"
                 onClick={() => setShowTechDetails(!showTechDetails)}
-                className="w-full flex items-center justify-between px-3.5 py-2.5 text-left text-xs font-bold text-[#0D47A1] hover:bg-[#F0F7FF] transition-colors"
+                className="w-full flex items-center justify-between px-3.5 py-2 text-left text-xs font-semibold text-slate-300 hover:bg-slate-800/40 transition-colors"
               >
                 <div className="flex items-center gap-2">
-                  <Sliders className="w-3.5 h-3.5 text-[#2196F3]" />
-                  <span>Technical Stream Specs</span>
-                  <span className="text-[10px] font-normal text-slate-500">
-                    (Codec, Framerate, Audio Channels)
-                  </span>
+                  <Sliders className="w-3.5 h-3.5 text-sky-400" />
+                  <span>Technical Stream Specs (Codec, Framerate, Audio)</span>
                 </div>
-                <ChevronDown
-                  className={`w-3.5 h-3.5 text-slate-500 transition-transform duration-200 ${
-                    showTechDetails ? 'rotate-180' : ''
-                  }`}
-                />
+                <ChevronDown className={`w-3.5 h-3.5 text-slate-500 transition-transform ${showTechDetails ? 'rotate-180' : ''}`} />
               </button>
 
               {showTechDetails && (
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 p-3 pt-1 border-t border-[#90CAF9]/40 bg-white text-xs">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 p-3 pt-2 border-t border-slate-800/80 bg-slate-950/80 text-xs font-mono">
                   <div>
-                    <span className="text-[10px] uppercase font-bold text-slate-400 block">Codec</span>
-                    <span className="font-mono font-bold text-[#0D47A1] uppercase">{probe?.videoCodec || 'H.264'}</span>
+                    <span className="text-[10px] uppercase text-slate-500 block">Codec</span>
+                    <span className="font-bold text-white uppercase">{probe?.videoCodec || 'H.264'}</span>
                   </div>
                   <div>
-                    <span className="text-[10px] uppercase font-bold text-slate-400 block">Framerate</span>
-                    <span className="font-mono font-bold text-[#0D47A1]">{probe ? `${probe.fps} fps` : 'N/A'}</span>
+                    <span className="text-[10px] uppercase text-slate-500 block">Framerate</span>
+                    <span className="font-bold text-white">{probe ? `${probe.fps} fps` : 'N/A'}</span>
                   </div>
                   <div>
-                    <span className="text-[10px] uppercase font-bold text-slate-400 block">Audio</span>
-                    <span className="font-mono font-bold text-[#0D47A1]">
+                    <span className="text-[10px] uppercase text-slate-500 block">Audio</span>
+                    <span className="font-bold text-white">
                       {probe?.hasAudio ? `${probe.audioCodec?.toUpperCase()} (${probe.audioChannels}ch)` : 'Silent'}
                     </span>
                   </div>
                   <div>
-                    <span className="text-[10px] uppercase font-bold text-slate-400 block">Color</span>
-                    <span className="font-mono font-bold text-[#0D47A1]">
-                      {probe?.isHDR ? 'HDR / BT.2020' : 'SDR / Rec.709'}
+                    <span className="text-[10px] uppercase text-slate-500 block">Bitrate</span>
+                    <span className="font-bold text-white">
+                      {probe?.bitrate ? `${Math.round(probe.bitrate / 1000)} kbps` : 'Auto'}
                     </span>
                   </div>
                 </div>
@@ -482,10 +577,11 @@ export function UploadZone({ onUploadComplete, onReset, onProceed }: UploadZoneP
             {/* Direct Proceed to Framing CTA */}
             {onProceed && (
               <button
+                type="button"
                 onClick={onProceed}
-                className="btn-pressable flex items-center justify-center gap-2 w-full py-3 rounded-xl bg-[#2196F3] hover:bg-[#1E88E5] text-white font-bold text-xs shadow-md shadow-[#2196F3]/25 transition-all"
+                className="flex items-center justify-center gap-2 w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-lg shadow-indigo-600/20 transition-all"
               >
-                <span>Continue to Framing</span>
+                <span>Continue to Framing &amp; Cuts</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             )}
@@ -495,241 +591,391 @@ export function UploadZone({ onUploadComplete, onReset, onProceed }: UploadZoneP
     );
   }
 
+  // ----------------------------------------------------
+  // VIEW B: MEDIA SELECTION (DRIVE | LOCAL | UPLOAD)
+  // ----------------------------------------------------
   return (
     <div className="flex flex-col gap-4">
-      {/* Mode Switcher */}
-      <div className="bg-white rounded-2xl p-1.5 border border-[#90CAF9]/60 shadow-sm flex items-center gap-1.5 self-start">
+      {/* 3-Way Mode Switcher */}
+      <div className="bg-slate-900/90 rounded-2xl p-1.5 border border-slate-800 shadow-xl flex flex-wrap items-center gap-1.5 self-start backdrop-blur-md">
         <button
-          onClick={() => setUploadMode('local')}
-          className={`btn-pressable flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-            uploadMode === 'local'
-              ? 'bg-[#2196F3] text-white shadow-md shadow-[#2196F3]/25'
-              : 'text-slate-600 hover:text-slate-900 hover:bg-[#F0F7FF]'
+          type="button"
+          onClick={() => setUploadMode('drive')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+            uploadMode === 'drive'
+              ? 'bg-sky-600 text-white shadow-md shadow-sky-600/25'
+              : 'text-slate-400 hover:text-white hover:bg-slate-800'
           }`}
         >
-          <Zap className="w-3.5 h-3.5 text-amber-300" />
-          <span>Direct Local File</span>
-          <span className="text-[9px] uppercase font-bold px-1.5 py-0.2 rounded bg-amber-400/20 text-amber-100 border border-amber-300/30">
-            0s Wait &bull; 0 Storage
+          <FolderSync className="w-3.5 h-3.5 text-sky-300" />
+          <span>Google Drive</span>
+          <span className="text-[9px] uppercase font-bold px-1.5 py-0.5 rounded bg-sky-400/20 text-sky-200 border border-sky-400/30">
+            Cloud Library
           </span>
         </button>
 
         <button
+          type="button"
+          onClick={() => setUploadMode('local')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+            uploadMode === 'local'
+              ? 'bg-amber-600 text-white shadow-md shadow-amber-600/25'
+              : 'text-slate-400 hover:text-white hover:bg-slate-800'
+          }`}
+        >
+          <HardDrive className="w-3.5 h-3.5 text-amber-300" />
+          <span>Mac Quick Folders</span>
+          <span className="text-[9px] uppercase font-bold px-1.5 py-0.5 rounded bg-amber-400/20 text-amber-200 border border-amber-400/30">
+            Direct Path
+          </span>
+        </button>
+
+        <button
+          type="button"
           onClick={() => setUploadMode('chunked')}
-          className={`btn-pressable flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
             uploadMode === 'chunked'
-              ? 'bg-[#2196F3] text-white shadow-md shadow-[#2196F3]/25'
-              : 'text-slate-600 hover:text-slate-900 hover:bg-[#F0F7FF]'
+              ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/25'
+              : 'text-slate-400 hover:text-white hover:bg-slate-800'
           }`}
         >
           <UploadCloud className="w-3.5 h-3.5" />
-          <span>Traditional Upload</span>
+          <span>Manual Upload</span>
         </button>
       </div>
 
-      {/* Mode A: Direct Local File (0-Second Wait, 0 Storage Overhead) */}
+      {/* Error Message Banner */}
+      {errorMessage && (
+        <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{errorMessage}</span>
+          </div>
+          <button type="button" onClick={() => setErrorMessage(null)} className="text-slate-400 hover:text-white">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
+      {/* ---------------------------------------------------- */}
+      {/* MODE 1: GOOGLE DRIVE (CLOUD BROWSER)                  */}
+      {/* ---------------------------------------------------- */}
+      {uploadMode === 'drive' && (
+        <div className="bg-slate-900/90 rounded-2xl p-6 border border-slate-800 shadow-xl flex flex-col gap-5 backdrop-blur-md">
+          {/* Header & Controls Toolbar */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-800">
+            <div>
+              <div className="flex items-center gap-2 mb-0.5">
+                <FolderSync className="w-5 h-5 text-sky-400" />
+                <h3 className="text-base font-bold text-white">Select Video from Google Drive</h3>
+              </div>
+              <p className="text-xs text-slate-400">
+                Videos are streamed and cached locally on your Mac for rapid splitting, framing, and subtitle processing.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => fetchDriveVideos(selectedDriveFolder, driveSearch)}
+                className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition-all"
+                title="Refresh Google Drive files"
+              >
+                <RotateCw className={`w-3.5 h-3.5 ${isLoadingDrive ? 'animate-spin text-sky-400' : ''}`} />
+              </button>
+            </div>
+          </div>
+
+          {/* Drive Auth Error Banner */}
+          {driveAuthError && (
+            <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <AlertCircle className="w-4 h-4 shrink-0 text-amber-400" />
+                <span>{driveAuthError}</span>
+              </div>
+              <a
+                href="/?tab=settings"
+                className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-semibold text-xs whitespace-nowrap transition-all shadow-md"
+              >
+                Open Drive Settings
+              </a>
+            </div>
+          )}
+
+          {/* Folder Filter & Search Bar */}
+          <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
+            <div className="sm:col-span-5">
+              <CustomSelect
+                options={driveFolders.length > 0 ? driveFolders : [{ value: 'default', label: 'Default Target Folder' }]}
+                value={selectedDriveFolder}
+                onChange={(val) => {
+                  setSelectedDriveFolder(val);
+                }}
+              />
+            </div>
+
+            <div className="sm:col-span-7 relative">
+              <Search className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={driveSearch}
+                onChange={(e) => setDriveSearch(e.target.value)}
+                placeholder="Filter Drive videos by title..."
+                className="w-full bg-slate-950/80 border border-slate-800 rounded-xl pl-10 pr-4 py-2 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-sky-500 font-mono transition-all"
+              />
+            </div>
+          </div>
+
+          {/* Download in progress notice */}
+          {driveDownloadNotice && (
+            <div className="p-3.5 rounded-xl bg-sky-500/10 border border-sky-500/20 text-sky-300 text-xs flex items-center gap-2.5 animate-pulse">
+              <RotateCw className="w-4 h-4 animate-spin text-sky-400 shrink-0" />
+              <span className="font-medium">{driveDownloadNotice}</span>
+            </div>
+          )}
+
+          {/* Drive Video Items Grid */}
+          <div className="flex flex-col gap-2 max-h-[460px] overflow-y-auto pr-1">
+            {isLoadingDrive && driveVideos.length === 0 && (
+              <div className="py-12 text-center text-xs text-slate-500 flex flex-col items-center gap-2">
+                <RotateCw className="w-5 h-5 animate-spin text-sky-400" />
+                <span>Scanning Google Drive folder...</span>
+              </div>
+            )}
+
+            {!isLoadingDrive && driveVideos.length === 0 && (
+              <div className="py-12 text-center text-xs text-slate-500 flex flex-col items-center gap-2">
+                <FolderSync className="w-7 h-7 text-slate-600" />
+                <span>No video files found matching current folder or search filter.</span>
+              </div>
+            )}
+
+            {driveVideos.map((vid) => {
+              const isDownloading = downloadingDriveId === vid.id;
+              const ext = vid.name.split('.').pop()?.toUpperCase() || 'VIDEO';
+
+              return (
+                <div
+                  key={vid.id}
+                  className="p-3 rounded-xl bg-slate-950/60 border border-slate-800/80 hover:border-sky-500/50 flex items-center justify-between gap-3 transition-all"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-9 h-9 rounded-lg bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-400 font-mono text-[10px] font-bold shrink-0">
+                      {ext.slice(0, 4)}
+                    </div>
+                    <div className="min-w-0">
+                      <h4 className="text-xs font-bold text-white truncate max-w-sm sm:max-w-md">{vid.name}</h4>
+                      <p className="text-[10px] text-slate-400 font-mono flex items-center gap-2 mt-0.5">
+                        <span>{vid.sizeFormatted}</span>
+                        {vid.durationSec && (
+                          <>
+                            <span>&bull;</span>
+                            <span>{Math.floor(vid.durationSec / 60)}m {vid.durationSec % 60}s</span>
+                          </>
+                        )}
+                        <span>&bull;</span>
+                        <span>{new Date(vid.createdTime).toLocaleDateString()}</span>
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    {/* Eye Preview Button (Opens Drive Preview) */}
+                    <a
+                      href={vid.webViewLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-sky-300 border border-slate-700 transition-all flex items-center gap-1.5 text-xs font-semibold"
+                      title="Inspect Video in Google Drive"
+                    >
+                      <Eye className="w-3.5 h-3.5 text-sky-400" />
+                      <span className="hidden sm:inline">Preview</span>
+                    </a>
+
+                    {/* Import & Clip Button */}
+                    <button
+                      type="button"
+                      onClick={() => handleSelectDriveVideo(vid)}
+                      disabled={isDownloading || Boolean(downloadingDriveId)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-sky-600 hover:bg-sky-500 text-white shadow-md shadow-sky-600/20 transition-all disabled:opacity-40"
+                    >
+                      {isDownloading ? (
+                        <RotateCw className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Download className="w-3.5 h-3.5" />
+                      )}
+                      <span>{isDownloading ? 'Importing...' : 'Import & Clip'}</span>
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ---------------------------------------------------- */}
+      {/* MODE 2: DIRECT LOCAL FILE (0-WAIT ON MAC)             */}
+      {/* ---------------------------------------------------- */}
       {uploadMode === 'local' && (
-        <div className="bg-white rounded-2xl p-6 border border-[#90CAF9]/60 shadow-sm flex flex-col gap-5">
+        <div className="bg-slate-900/90 rounded-2xl p-6 border border-slate-800 shadow-xl flex flex-col gap-5 backdrop-blur-md">
           <div>
             <div className="flex items-center gap-2 mb-1">
-              <HardDrive className="w-5 h-5 text-[#2196F3]" />
-              <h3 className="text-base font-bold text-[#0D47A1]">Select Video File Directly on your Mac</h3>
+              <HardDrive className="w-5 h-5 text-amber-400" />
+              <h3 className="text-base font-bold text-white">Select Video File Directly on your Mac</h3>
             </div>
-            <p className="text-xs text-slate-600">
-              Because VideoTimmer runs locally on your Mac, it slices your video directly from its existing location without transferring or copying gigabytes.
+            <p className="text-xs text-slate-400">
+              Because VideoTimmer runs locally on your Mac, it slices your video directly from its existing location without transferring gigabytes.
             </p>
           </div>
 
           {/* Direct Path Input */}
           <div className="flex flex-col gap-2">
-            <label className="text-xs font-bold text-[#0D47A1]">Enter or Paste Absolute Video Path:</label>
+            <label className="text-xs font-bold text-slate-300">Enter or Paste Absolute Video Path:</label>
             <div className="flex gap-2">
               <input
                 type="text"
                 value={localPathInput}
                 onChange={(e) => setLocalPathInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleProbeLocalPath()}
-                placeholder="e.g. /Users/username/Downloads/movie.mp4 or ~/Movies/podcast.mp4"
-                className="flex-1 px-4 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:border-[#2196F3] text-xs font-mono"
+                placeholder="/Users/username/Movies/sample_video.mp4"
+                className="flex-1 bg-slate-950/80 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-amber-500 font-mono transition-all"
               />
               <button
                 type="button"
-                disabled={isProbingLocal || !localPathInput.trim()}
                 onClick={() => handleProbeLocalPath()}
-                className="btn-pressable flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-[#2196F3] hover:bg-[#1E88E5] text-white font-bold text-xs shadow-md shadow-[#2196F3]/25 disabled:opacity-50 shrink-0"
+                disabled={isProbingLocal || !localPathInput.trim()}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-amber-600 hover:bg-amber-500 text-white shadow-lg shadow-amber-600/20 transition-all disabled:opacity-40"
               >
-                {isProbingLocal ? (
-                  <>
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    <span>Inspecting...</span>
-                  </>
-                ) : (
-                  <>
-                    <Zap className="w-3.5 h-3.5 text-amber-300" />
-                    <span>Load Instantly</span>
-                  </>
-                )}
+                {isProbingLocal ? <RotateCw className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
+                <span>Inspect Video</span>
               </button>
             </div>
           </div>
 
-          {/* Quick Folder Shortcuts & File Browser */}
-          <div className="p-4 rounded-xl bg-[#F0F7FF] border border-[#90CAF9]/60 flex flex-col gap-3">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <span className="text-xs font-bold text-[#0D47A1] flex items-center gap-1.5">
-                <FolderOpen className="w-4 h-4 text-[#2196F3]" /> Quick Mac Folder Presets
+          {/* Quick Folders Browser */}
+          <div className="flex flex-col gap-3 pt-4 border-t border-slate-800">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                <FolderOpen className="w-4 h-4 text-amber-400" />
+                Quick Browse Local Mac Folders:
               </span>
-
-              {/* Preset Buttons */}
-              <div className="flex items-center gap-1.5 text-xs">
-                {[
-                  { id: 'workspace', label: 'Workspace' },
-                  { id: 'downloads', label: 'Downloads' },
-                  { id: 'movies', label: 'Movies' },
-                  { id: 'desktop', label: 'Desktop' },
-                ].map((f) => (
+              <div className="flex items-center gap-1.5">
+                {(['workspace', 'downloads', 'movies', 'desktop'] as const).map((preset) => (
                   <button
-                    key={f.id}
-                    onClick={() => setActiveFolderPreset(f.id as any)}
-                    className={`px-2.5 py-1 rounded-lg font-semibold text-[11px] transition-all ${
-                      activeFolderPreset === f.id
-                        ? 'bg-[#2196F3] text-white shadow-sm'
-                        : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
+                    key={preset}
+                    type="button"
+                    onClick={() => setActiveFolderPreset(preset)}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold capitalize transition-all ${
+                      activeFolderPreset === preset
+                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                        : 'bg-slate-950/60 hover:bg-slate-800 text-slate-400 border border-slate-800'
                     }`}
                   >
-                    {f.label}
+                    {preset}
                   </button>
                 ))}
               </div>
             </div>
 
-            {/* Folder Video List */}
-            {isLoadingFolder ? (
-              <div className="p-4 text-center text-xs text-slate-500 flex items-center justify-center gap-2">
-                <RefreshCw className="w-3.5 h-3.5 animate-spin text-[#2196F3]" />
-                <span>Scanning {activeFolderPreset}...</span>
-              </div>
-            ) : folderVideos.length === 0 ? (
-              <div className="p-4 rounded-lg bg-white border border-slate-200 text-center text-[11px] text-slate-500">
-                No video files (.mp4, .mov, .mkv) found in {activeFolderPreset}. Paste your exact path above or pick another folder.
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1">
-                {folderVideos.map((v) => (
-                  <button
-                    key={v.fullPath}
-                    onClick={() => {
-                      setLocalPathInput(v.fullPath);
-                      handleProbeLocalPath(v.fullPath);
-                    }}
-                    className="p-2.5 rounded-lg bg-white border border-slate-200 hover:border-[#2196F3] hover:bg-white/90 text-left transition-all flex items-center justify-between group shadow-2xs"
-                  >
-                    <div className="truncate max-w-[220px]">
-                      <p className="text-xs font-bold text-slate-800 truncate group-hover:text-[#0D47A1]">
-                        {v.name}
-                      </p>
-                      <p className="text-[10px] text-slate-500 font-mono">
-                        {v.sizeFormatted} &bull; {v.modifiedAt}
-                      </p>
-                    </div>
-                    <ArrowRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-[#2196F3] group-hover:translate-x-0.5 transition-all shrink-0 ml-2" />
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+            {/* Folder Videos List */}
+            <div className="flex flex-col gap-2 max-h-[320px] overflow-y-auto pr-1">
+              {isLoadingFolder && (
+                <div className="py-8 text-center text-xs text-slate-500 flex items-center justify-center gap-2">
+                  <RotateCw className="w-4 h-4 animate-spin text-amber-400" />
+                  <span>Scanning folder...</span>
+                </div>
+              )}
 
-          <div className="flex flex-wrap items-center justify-between text-[11px] text-slate-500 font-medium pt-2 border-t border-slate-100">
-            <span className="flex items-center gap-1 text-emerald-700 font-bold">
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Zero upload wait time
-            </span>
-            <span className="flex items-center gap-1 text-emerald-700 font-bold">
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Zero duplicate disk storage
-            </span>
-            <span className="flex items-center gap-1 text-emerald-700 font-bold">
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Preserves 100% original quality
-            </span>
+              {!isLoadingFolder && folderVideos.length === 0 && (
+                <div className="py-8 text-center text-xs text-slate-500">
+                  No video files found in selected Mac folder.
+                </div>
+              )}
+
+              {folderVideos.map((item, idx) => (
+                <div
+                  key={idx}
+                  className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 flex items-center justify-between gap-3 hover:border-amber-500/40 transition-all"
+                >
+                  <div className="min-w-0">
+                    <h4 className="text-xs font-bold text-white truncate max-w-sm sm:max-w-md">{item.name}</h4>
+                    <p className="text-[10px] text-slate-400 font-mono">
+                      {item.sizeFormatted} &bull; {new Date(item.modifiedAt).toLocaleDateString()}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleProbeLocalPath(item.fullPath)}
+                    className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-600 hover:bg-amber-500 text-white shadow-md shadow-amber-600/20 transition-all"
+                  >
+                    <Play className="w-3 h-3" />
+                    <span>Select Clip</span>
+                  </button>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}
 
-      {/* Mode B: Chunked Upload Dropzone */}
+      {/* ---------------------------------------------------- */}
+      {/* MODE 3: TRADITIONAL CHUNKED UPLOAD                   */}
+      {/* ---------------------------------------------------- */}
       {uploadMode === 'chunked' && (
         <div
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
-          className={`bg-white rounded-2xl p-8 flex flex-col items-center justify-center text-center border-dashed border-2 transition-all min-h-[360px] relative shadow-sm ${
+          onClick={() => !uploading && fileInputRef.current?.click()}
+          className={`bg-slate-900/90 rounded-2xl p-10 border-2 border-dashed transition-all cursor-pointer flex flex-col items-center justify-center gap-3 backdrop-blur-md ${
             isDragging
-              ? 'border-[#2196F3] bg-[#E3F2FD] scale-[1.01]'
-              : 'border-[#90CAF9] hover:border-[#2196F3] hover:bg-[#F0F7FF]/50'
+              ? 'border-indigo-500 bg-indigo-500/10'
+              : 'border-slate-800 hover:border-slate-700'
           }`}
         >
           <input
-            ref={fileInputRef}
             type="file"
-            accept=".mp4,.mov,.mkv,.webm,.avi,.m4v,video/*"
-            onChange={handleFileInputChange}
+            ref={fileInputRef}
+            onChange={handleFileChange}
+            accept="video/*,.mp4,.mov,.mkv,.webm"
             className="hidden"
-            disabled={uploading}
           />
 
-          {!uploading ? (
-            <>
-              <div className="w-16 h-16 rounded-2xl bg-[#E3F2FD] border border-[#90CAF9] flex items-center justify-center text-[#2196F3] mb-4 shadow-sm group-hover:scale-105 transition-all">
-                <UploadCloud className="w-8 h-8" />
-              </div>
-              <h3 className="text-xl font-extrabold text-[#0D47A1] mb-1">Upload Source Video</h3>
-              <p className="text-xs text-slate-600 max-w-sm mb-5 leading-relaxed font-medium">
-                Drag &amp; drop your video here, or browse from your computer. Supports MP4, MOV, MKV, WebM, AVI up to 2GB.
-              </p>
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                className="btn-pressable inline-flex items-center gap-2 px-6 py-2.5 rounded-xl bg-[#2196F3] hover:bg-[#1E88E5] text-white font-bold text-xs shadow-md shadow-[#2196F3]/25"
-              >
-                Browse Files
-              </button>
-            </>
-          ) : (
-            <div className="w-full max-w-md flex flex-col gap-4">
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-bold text-[#0D47A1] truncate max-w-[240px]">
-                  {currentFile?.name}
-                </span>
-                <span className="text-[#2196F3] font-mono font-bold">{progress}%</span>
-              </div>
+          <div className="w-14 h-14 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
+            <UploadCloud className="w-7 h-7" />
+          </div>
 
-              {/* Progress Bar */}
-              <div className="w-full bg-[#E3F2FD] h-3 rounded-full overflow-hidden border border-[#90CAF9]">
+          <div className="text-center">
+            <h4 className="text-sm font-bold text-white">Click to browse or drag &amp; drop video file</h4>
+            <p className="text-xs text-slate-400 mt-1">Supports MP4, MOV, MKV, WebM up to 50 GB</p>
+          </div>
+
+          {/* Active Uploading Progress Bar */}
+          {uploading && currentFile && (
+            <div className="w-full max-w-md flex flex-col gap-2 mt-4" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between text-xs text-slate-300">
+                <span className="truncate max-w-[200px] font-mono">{currentFile.name}</span>
+                <span className="font-mono font-bold text-indigo-400">{progress}%</span>
+              </div>
+              <div className="w-full h-2 rounded-full bg-slate-800 overflow-hidden">
                 <div
-                  className="bg-[#2196F3] h-full rounded-full transition-all duration-200"
+                  className="h-full bg-gradient-to-r from-indigo-500 to-sky-500 rounded-full transition-all duration-200"
                   style={{ width: `${progress}%` }}
                 />
               </div>
-
-              <div className="flex items-center justify-between text-[11px] text-slate-600 font-mono font-semibold">
-                <span>Speed: {speedMb} MB/s</span>
-                <span>ETA: {etaSec}s remaining</span>
+              <div className="flex items-center justify-between text-[11px] text-slate-500 font-mono">
+                <span>{speedMb} MB/s</span>
+                <span>ETA: {etaSec}s</span>
               </div>
-
-              <div className="flex justify-center pt-2">
-                <button
-                  onClick={cancelUpload}
-                  className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 text-xs font-semibold transition-all"
-                >
-                  <X className="w-3.5 h-3.5" />
-                  Cancel Upload
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={handleAbort}
+                className="self-center mt-2 px-3 py-1 rounded-lg text-xs text-rose-400 hover:bg-rose-500/10 border border-rose-500/20 transition-all"
+              >
+                Cancel Upload
+              </button>
             </div>
           )}
-        </div>
-      )}
-
-      {errorMessage && (
-        <div className="flex items-center gap-2 p-3 rounded-xl bg-rose-50 border border-rose-300 text-rose-800 text-xs font-semibold">
-          <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
-          <span>{errorMessage}</span>
         </div>
       )}
     </div>

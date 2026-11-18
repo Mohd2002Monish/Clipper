@@ -517,7 +517,7 @@ export function OmniPipelineManagerView() {
           <div className="space-y-2">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 backdrop-blur-md text-xs font-semibold tracking-wide border border-white/20">
               <Layers className="w-3.5 h-3.5 text-sky-400" />
-              <span>Multi-Channel Auto-Pilot Pipelines</span>
+              <span>Auto-Post Pipelines</span>
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
             </div>
             <h1 className="text-2xl md:text-3xl font-black tracking-tight">

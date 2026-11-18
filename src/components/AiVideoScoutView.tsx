@@ -28,10 +28,10 @@ import {
 import { CustomSelect, SelectOption } from '@/components/ui/CustomSelect';
 
 const FOLDER_OPTIONS: SelectOption[] = [
-  { value: 'Shorts', label: 'Shorts', description: 'YouTube Shorts & Instagram Reels' },
+  { value: 'General', label: 'General', description: 'Default storage repository' },
+  { value: 'Shorts', label: 'Shorts', description: 'Short clips folder' },
   { value: 'GTA-5', label: 'GTA-5', description: 'GTA V gameplay & stunts folder' },
   { value: 'Movie-Vault', label: 'Movie-Vault', description: 'Film climaxes & viral scenes' },
-  { value: 'General', label: 'General', description: 'Default storage repository' },
   { value: 'local', label: 'Local Storage', description: 'Direct device internal storage' },
 ];
 
@@ -97,19 +97,19 @@ interface VideoScoutSchedule {
 
 const PRESETS = [
   {
-    label: 'GTA-5 Viral Stunts',
+    label: 'GTA-5 Stunts & Gameplay',
     folder: 'GTA-5',
-    prompt: 'Find 5 most viral GTA 5 stunt and drift videos, split into 60s vertical shorts with dynamic yellow subtitles, and save to GTA-5 folder',
+    prompt: 'Top viral GTA 5 stunt and drift videos',
   },
   {
-    label: 'Movie Vault Climax Gems',
+    label: 'Movie Vault Climaxes',
     folder: 'Movie-Vault',
-    prompt: 'Find 5 mind-bending movie scenes and climax endings from psychological thrillers, generate subtitles, and upload to Movie-Vault',
+    prompt: 'Mind-bending psychological thriller endings and climax movie scenes',
   },
   {
-    label: 'Bollywood Comedy Shorts',
-    folder: 'Shorts',
-    prompt: 'Find 5 trending Bollywood comedy movie scenes with high views, auto-caption with subtitles, and upload to Shorts',
+    label: 'Trending Comedy Scenes',
+    folder: 'General',
+    prompt: 'Trending Bollywood comedy movie scenes with high views',
   },
 ];
 
@@ -118,10 +118,10 @@ export function AiVideoScoutView() {
 
   // Instant Scout State
   const [prompt, setPrompt] = useState<string>('');
-  const [targetFolder, setTargetFolder] = useState<string>('Shorts');
+  const [targetFolder, setTargetFolder] = useState<string>('General');
   const [targetCount, setTargetCount] = useState<number>(5);
   const [captionStyle, setCaptionStyle] = useState<'viral_yellow' | 'classic_white' | 'karaoke_glow'>('viral_yellow');
-  const [autoCaption, setAutoCaption] = useState<boolean>(true);
+  const [autoCaption, setAutoCaption] = useState<boolean>(false);
   const [autoIngest, setAutoIngest] = useState<boolean>(false);
   const [isSearching, setIsSearching] = useState<boolean>(false);
   const [logs, setLogs] = useState<string[]>([]);
@@ -185,8 +185,8 @@ export function AiVideoScoutView() {
     setIsSearching(true);
     setScoutResult(null);
     setLogs([]);
-    addLog(`Initiating AI Video Scout for prompt: "${prompt}"`);
-    addLog(`Target Folder: [${targetFolder}], Requested Count: ${targetCount}, Mode: ${autoIngest ? 'Full Autopilot' : 'Review & Approve'}`);
+    addLog(`Searching online videos for prompt: "${prompt}"`);
+    addLog(`Target Folder: [${targetFolder}], Mode: ${autoIngest ? 'Direct Ingest' : 'Review & Approve'}`);
 
     try {
       const res = await fetch('/api/scout/discover', {
@@ -382,10 +382,10 @@ export function AiVideoScoutView() {
             </div>
             <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
               <Sparkles className="w-6 h-6 text-indigo-400" />
-              AI Video Scout & Subtitle Autopilot
+              Find Online Videos
             </h1>
             <p className="text-sm text-slate-300 mt-1 max-w-2xl">
-              Instruct the AI in plain English to discover trending YouTube videos, guarantee 100% unique content daily, generate exact timestamped subtitles with Gemini, and upload finished clips straight to Google Drive.
+              Search for online videos on any topic in plain English and save them directly into your Ingest Downloads folder.
             </p>
           </div>
 
@@ -464,52 +464,20 @@ export function AiVideoScoutView() {
                 </div>
               </div>
 
-              {/* Configurations Grid */}
-              <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-800/80">
-                <div>
-                  <label className="text-xs font-medium text-slate-400 block mb-1">Target Folder</label>
-                  <CustomSelect
-                    value={targetFolder}
-                    onChange={(val) => setTargetFolder(val)}
-                    options={FOLDER_OPTIONS}
-                    size="sm"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-xs font-medium text-slate-400 block mb-1">Target Count</label>
-                  <CustomSelect
-                    value={String(targetCount)}
-                    onChange={(val) => setTargetCount(Number(val))}
-                    options={COUNT_OPTIONS}
-                    size="sm"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-xs font-medium text-slate-400 block mb-1">AI Subtitle Style</label>
-                  <CustomSelect
-                    value={captionStyle}
-                    onChange={(val) => setCaptionStyle(val as any)}
-                    options={CAPTION_STYLE_OPTIONS}
-                    size="sm"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-xs font-medium text-slate-400 block mb-1">Subtitles</label>
-                  <button
-                    onClick={() => setAutoCaption(!autoCaption)}
-                    className={`w-full py-2 px-2.5 rounded-lg text-xs font-medium border text-left transition-colors flex items-center justify-between ${
-                      autoCaption
-                        ? 'bg-indigo-950/60 border-indigo-700 text-indigo-300'
-                        : 'bg-slate-950 border-slate-800 text-slate-400'
-                    }`}
-                  >
-                    <span>{autoCaption ? 'Enabled' : 'Disabled'}</span>
-                    {autoCaption && <Check className="w-3.5 h-3.5 text-indigo-400" />}
-                  </button>
-                </div>
+              {/* Target Folder Selector */}
+              <div className="pt-2 border-t border-slate-800/80">
+                <label className="text-xs font-semibold text-slate-300 block mb-1.5">
+                  Target Folder in Ingest Downloads
+                </label>
+                <CustomSelect
+                  value={targetFolder}
+                  onChange={(val) => setTargetFolder(val)}
+                  options={FOLDER_OPTIONS}
+                  size="md"
+                />
+                <p className="text-[11px] text-slate-500 mt-1.5">
+                  Videos found will be routed and saved directly into this folder inside your Ingest Downloads queue.
+                </p>
               </div>
 
               {/* Execution Mode Radio */}
@@ -539,7 +507,7 @@ export function AiVideoScoutView() {
                     }`}
                   >
                     <span className="block font-semibold">Full Autopilot</span>
-                    <span className="text-[10px] text-slate-400">Direct to Drive</span>
+                    <span className="text-[10px] text-slate-400">Direct to Ingest Queue</span>
                   </button>
                 </div>
               </div>
@@ -553,12 +521,12 @@ export function AiVideoScoutView() {
                 {isSearching ? (
                   <>
                     <RefreshCw className="w-4 h-4 animate-spin text-white" />
-                    AI Scout Scanning YouTube...
+                    Searching YouTube...
                   </>
                 ) : (
                   <>
-                    <Sparkles className="w-4 h-4 text-white" />
-                    Launch AI Video Scout
+                    <Search className="w-4 h-4 text-white" />
+                    Find Videos
                   </>
                 )}
               </button>
@@ -643,7 +611,7 @@ export function AiVideoScoutView() {
             {isSearching && (
               <div className="bg-slate-900 border border-slate-800/80 rounded-2xl p-12 text-center text-slate-400">
                 <RefreshCw className="w-10 h-10 animate-spin mx-auto mb-3 text-indigo-400" />
-                <h3 className="text-base font-semibold text-white mb-1">AI Video Scout is Working</h3>
+                <h3 className="text-base font-semibold text-white mb-1">Searching Online Videos</h3>
                 <p className="text-xs text-slate-400">
                   Scanning YouTube, cross-referencing de-duplication registry, and ranking candidates by virality...
                 </p>

@@ -39,6 +39,7 @@ import {
   ChevronUp,
 } from 'lucide-react';
 import { NoticeModal } from './ui/NoticeModal';
+import { safeFetchJson } from '@/lib/safeJson';
 
 export type ClipIngestSubTab = 'table' | 'vault-leads' | 'worker';
 
@@ -202,8 +203,8 @@ export function ClipIngestQueueView({
   const fetchWorkerStatus = useCallback(async () => {
     try {
       const res = await fetch('/api/worker/control');
-      if (res.ok) {
-        const data = await res.json();
+      const { ok, data } = await safeFetchJson<{ isRunning?: boolean; pid?: number }>(res);
+      if (ok && data) {
         setIsWorkerActive(Boolean(data.isRunning));
         setWorkerPid(data.pid || null);
       }
@@ -216,8 +217,8 @@ export function ClipIngestQueueView({
   const fetchWorkerLogs = useCallback(async () => {
     try {
       const res = await fetch('/api/logs/files/worker?limit=25');
-      if (res.ok) {
-        const data = await res.json();
+      const { ok, data } = await safeFetchJson<{ logs?: any[] }>(res);
+      if (ok && data) {
         const logs = (data.logs || []).map((l: any) => l.message || JSON.stringify(l));
         setWorkerLogs(logs.reverse());
       }
@@ -234,8 +235,8 @@ export function ClipIngestQueueView({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action }),
       });
-      const data = await res.json();
-      if (data.success) {
+      const { ok, data, error } = await safeFetchJson<{ success?: boolean; pid?: number; error?: string }>(res);
+      if (ok && data?.success) {
         setIsWorkerActive(action === 'start');
         setWorkerPid(data.pid || null);
         setNotice({
@@ -254,15 +255,16 @@ export function ClipIngestQueueView({
         setNotice({
           isOpen: true,
           title: 'Worker Error',
-          message: data.error || `Failed to ${action} worker engine.`,
+          message: error || data?.error || `Failed to ${action} worker engine.`,
           type: 'error',
         });
       }
-    } catch {
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
       setNotice({
         isOpen: true,
         title: 'Communication Failure',
-        message: 'Could not contact worker control endpoint.',
+        message: `Could not contact worker control endpoint: ${msg}`,
         type: 'error',
       });
     } finally {

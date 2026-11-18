@@ -248,6 +248,43 @@ export class DriveService {
   }
 
   /**
+   * Fetches Google Drive storage quota and authenticated user info
+   */
+  public async getStorageQuota(): Promise<{
+    success: boolean;
+    storageQuota?: {
+      limit?: string;
+      usage?: string;
+      usageInDrive?: string;
+      usageInDriveTrash?: string;
+    };
+    user?: {
+      displayName?: string;
+      emailAddress?: string;
+      photoLink?: string;
+    };
+    error?: string;
+  }> {
+    try {
+      const drive = await this.getAuthenticatedDrive();
+      if (!drive) {
+        return { success: false, error: 'Google Drive is not authenticated or refresh token expired.' };
+      }
+      const res = await drive.about.get({
+        fields: 'user, storageQuota',
+      });
+      return {
+        success: true,
+        storageQuota: res.data.storageQuota as any,
+        user: res.data.user as any,
+      };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { success: false, error: msg };
+    }
+  }
+
+  /**
    * Ensures a subfolder exists inside parent folder, creates it if missing
    */
   public async ensureSubfolder(parentFolderId: string, subfolderName: string): Promise<string> {

@@ -77,6 +77,7 @@ import { VideoProbeData, IJob } from '@/shared/types';
 import { PartPlan, TextOverlaySettings } from '@/shared/schemas';
 import { CustomSelect } from '@/components/ui/CustomSelect';
 import { NoticeModal } from '@/components/ui/NoticeModal';
+import { safeFetchJson } from '@/lib/safeJson';
 
 interface HealthData {
   status: string;
@@ -259,8 +260,8 @@ export default function HomePage() {
   const fetchWorkerStatus = useCallback(async () => {
     try {
       const res = await fetch('/api/worker/control');
-      if (res.ok) {
-        const data = await res.json();
+      const { ok, data } = await safeFetchJson<{ isRunning?: boolean; pid?: number }>(res);
+      if (ok && data) {
         setIsWorkerRunning(Boolean(data.isRunning));
         setWorkerPid(data.pid || null);
       }
@@ -277,8 +278,8 @@ export default function HomePage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action }),
       });
-      const data = await res.json();
-      if (data.success) {
+      const { ok, data, error } = await safeFetchJson<{ success?: boolean; pid?: number; error?: string }>(res);
+      if (ok && data?.success) {
         setIsWorkerRunning(action === 'start');
         setWorkerPid(data.pid || null);
         setWorkerNotice(
@@ -287,7 +288,7 @@ export default function HomePage() {
             : 'Worker engine stopped. CPU and battery are now preserved.'
         );
       } else {
-        setWorkerNotice(data.error || `Failed to ${action} worker.`);
+        setWorkerNotice(error || data?.error || `Failed to ${action} worker.`);
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -717,9 +718,9 @@ export default function HomePage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: 'start' }),
         })
-          .then((r) => r.json())
-          .then((d) => {
-            if (d.success) {
+          .then((r) => safeFetchJson<{ success?: boolean; pid?: number }>(r))
+          .then(({ ok, data: d }) => {
+            if (ok && d?.success) {
               setIsWorkerRunning(true);
               setWorkerPid(d.pid || null);
               setWorkerNotice(`Render worker auto-started (PID: ${d.pid || 'Active'}) to process job.`);

@@ -420,6 +420,13 @@ export function YouTubePublisherView() {
     try {
       setIsSyncingAnalytics(true);
       setCampaignActionMsg('Querying YouTube API for latest views, likes & comments...');
+      
+      // Also sync channel uploaded videos
+      await fetch('/api/youtube/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      }).catch(() => {});
+
       const res = await fetch('/api/youtube/campaigns/sync-analytics', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -794,7 +801,7 @@ export function YouTubePublisherView() {
           <div className="space-y-2">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/20 backdrop-blur-md text-xs font-semibold tracking-wide border border-white/20">
               <Youtube className="w-3.5 h-3.5 text-white" />
-              <span>Multi-Account YouTube Studio</span>
+              <span>YouTube Channel</span>
             </div>
             <h1 className="text-2xl md:text-3xl font-black tracking-tight">
               YouTube Drive & Shorts Dispatcher

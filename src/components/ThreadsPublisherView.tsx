@@ -2717,7 +2717,7 @@ export function ThreadsPublisherView({ initialSubTab = 'composer' }: ThreadsPubl
                 </div>
               ) : availableVideos.length === 0 ? (
                 <div className="p-8 text-center text-xs text-slate-400">
-                  No rendered video parts found. Split a video in Studio & Splitter first.
+                  No rendered video parts found. Split a video in Video Splitter first.
                 </div>
               ) : (
                 availableVideos.map((vid) => (

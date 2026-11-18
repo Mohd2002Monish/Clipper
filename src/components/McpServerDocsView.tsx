@@ -197,19 +197,19 @@ export function McpServerDocsView() {
       {/* Quick Integration Details Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Box 1: API Endpoint & Transports */}
-        <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm space-y-4">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+        <div className="bg-slate-900/90 rounded-2xl border border-slate-800 p-6 shadow-xl space-y-4 backdrop-blur-md">
+          <div className="flex items-center justify-between pb-3 border-b border-slate-800">
             <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center font-bold">
+              <div className="w-8 h-8 rounded-xl bg-purple-500/10 text-purple-400 border border-purple-500/20 flex items-center justify-center font-bold">
                 <Globe className="w-4 h-4" />
               </div>
               <div>
-                <h3 className="text-sm font-bold text-slate-900">HTTP & SSE MCP Endpoint</h3>
-                <p className="text-[11px] text-slate-400">Primary remote transport for Antigravity & clients</p>
+                <h3 className="text-sm font-bold text-white">HTTP &amp; SSE MCP Endpoint</h3>
+                <p className="text-[11px] text-slate-400">Primary remote transport for Antigravity &amp; clients</p>
               </div>
             </div>
             {mcpPingMs !== null && (
-              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold">
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold">
                 Ping: {mcpPingMs}ms
               </span>
             )}
@@ -266,14 +266,14 @@ export function McpServerDocsView() {
         </div>
 
         {/* Box 2: Antigravity Config Snippet */}
-        <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm space-y-4">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+        <div className="bg-slate-900/90 rounded-2xl border border-slate-800 p-6 shadow-xl space-y-4 backdrop-blur-md">
+          <div className="flex items-center justify-between pb-3 border-b border-slate-800">
             <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold">
+              <div className="w-8 h-8 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center justify-center font-bold">
                 <Cpu className="w-4 h-4" />
               </div>
               <div>
-                <h3 className="text-sm font-bold text-slate-900">Antigravity Configuration</h3>
+                <h3 className="text-sm font-bold text-white">Antigravity Configuration</h3>
                 <p className="text-[11px] text-slate-400">File: ~/.gemini/config/mcp_config.json</p>
               </div>
             </div>
@@ -406,15 +406,15 @@ export function McpServerDocsView() {
       </div>
 
       {/* Supported Tools Directory */}
-      <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm space-y-4">
-        <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+      <div className="bg-slate-900/90 rounded-2xl border border-slate-800 p-6 shadow-xl space-y-4 backdrop-blur-md">
+        <div className="flex items-center justify-between pb-3 border-b border-slate-800">
           <div>
-            <h3 className="text-sm font-bold text-slate-900">Registered MCP Tools ({registeredTools.length} Tools)</h3>
+            <h3 className="text-sm font-bold text-white">Registered MCP Tools ({registeredTools.length} Tools)</h3>
             <p className="text-xs text-slate-400">
               Universal tools available to AI assistants for content creation, scheduling, and metrics
             </p>
           </div>
-          <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-purple-100 text-purple-700 font-mono">
+          <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/20 font-mono">
             {registeredTools.length} Tools Available
           </span>
         </div>

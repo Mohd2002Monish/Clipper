@@ -82,15 +82,17 @@ export class AiVideoScoutService {
   public async parseUserPrompt(prompt: string, folderOverride?: string): Promise<ParsedScoutIntent> {
     const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY;
 
-    // Smart fallback defaults
-    const lower = prompt.toLowerCase();
-    let detectedFolder = folderOverride || 'Shorts';
-    if (lower.includes('gta') || lower.includes('gtav')) {
-      detectedFolder = 'GTA-5';
-    } else if (lower.includes('vault') || lower.includes('movie') || lower.includes('thriller') || lower.includes('cinema')) {
-      detectedFolder = 'Movie-Vault';
-    } else if (lower.includes('general')) {
-      detectedFolder = 'General';
+    // Strict folder assignment: if user selected a folder, honor it 100%
+    let detectedFolder = folderOverride?.trim();
+    if (!detectedFolder) {
+      const lower = prompt.toLowerCase();
+      if (lower.includes('gta') || lower.includes('gtav')) {
+        detectedFolder = 'GTA-5';
+      } else if (lower.includes('vault') || lower.includes('movie') || lower.includes('thriller') || lower.includes('cinema')) {
+        detectedFolder = 'Movie-Vault';
+      } else {
+        detectedFolder = 'General';
+      }
     }
 
     // Detect count (default 5)
@@ -103,11 +105,11 @@ export class AiVideoScoutService {
     if (!apiKey) {
       // Fallback without Gemini API
       return {
-        searchQueries: [prompt, `${prompt} viral shorts`, `${prompt} best moments`],
+        searchQueries: [prompt, `${prompt} full video`, `${prompt} scenes`],
         targetFolder: detectedFolder,
         targetCount: detectedCount,
         contentTheme: prompt,
-        autoCaption: true,
+        autoCaption: false,
         captionStyle: 'viral_yellow',
         autoSplit: true,
         partDurationSeconds: 60,
@@ -118,8 +120,8 @@ export class AiVideoScoutService {
       const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
       const systemInstruction = `You are an AI Video Researcher and Content Strategist.
 Given a user prompt requesting video topics, return a strict JSON object with:
-- "searchQueries": an array of 3 to 4 distinct, high-impact YouTube search query strings designed to find the most viral, high-view videos matching the prompt.
-- "targetFolder": one of ["Shorts", "GTA-5", "Movie-Vault", "General"] based on the theme.
+- "searchQueries": an array of 3 to 4 distinct, high-impact YouTube search query strings designed to find the top, high-view videos directly matching the user's prompt without forcing shorts.
+- "targetFolder": "${detectedFolder}".
 - "targetCount": number of videos the user asked for (between 1 and 20, default 5).
 - "contentTheme": a brief 1-sentence description of the ideal winning video.
 - "autoCaption": boolean, true if dynamic subtitles would improve this content.
@@ -148,11 +150,11 @@ Respond ONLY with valid JSON. No markdown backticks, no explanations.`;
       return {
         searchQueries: Array.isArray(parsed.searchQueries) && parsed.searchQueries.length > 0
           ? parsed.searchQueries
-          : [prompt, `${prompt} shorts`],
-        targetFolder: folderOverride || parsed.targetFolder || detectedFolder,
+          : [prompt, `${prompt} full video`, `${prompt} scenes`],
+        targetFolder: detectedFolder,
         targetCount: parsed.targetCount || detectedCount,
         contentTheme: parsed.contentTheme || prompt,
-        autoCaption: parsed.autoCaption ?? true,
+        autoCaption: parsed.autoCaption ?? false,
         captionStyle: parsed.captionStyle || 'viral_yellow',
         autoSplit: true,
         partDurationSeconds: parsed.partDurationSeconds || 60,
@@ -161,11 +163,11 @@ Respond ONLY with valid JSON. No markdown backticks, no explanations.`;
       const msg = err instanceof Error ? err.message : String(err);
       logger.system('warn', 'SCOUT_GEMINI_PARSE_FALLBACK', `Failed to parse prompt with Gemini: ${msg}`);
       return {
-        searchQueries: [prompt, `${prompt} viral shorts`, `${prompt} compilation`],
-        targetFolder: folderOverride || detectedFolder,
+        searchQueries: [prompt, `${prompt} full video`, `${prompt} scenes`],
+        targetFolder: detectedFolder,
         targetCount: detectedCount,
         contentTheme: prompt,
-        autoCaption: true,
+        autoCaption: false,
         captionStyle: 'viral_yellow',
         autoSplit: true,
         partDurationSeconds: 60,
@@ -319,7 +321,7 @@ Respond ONLY with valid JSON. No markdown backticks, no explanations.`;
       const promptText = `You are a viral media curator.
 Target Goal: "${theme}"
 Need: Select the TOP ${targetCount} best videos from this list.
-Criteria: High virality, engagement potential, title appeal, and alignment with the target goal. Prefer videos between 30 seconds and 600 seconds.
+Criteria: High view count, engagement potential, title appeal, and strict relevance to the target goal.
 
 Candidates:
 ${JSON.stringify(candidateSummaries, null, 2)}

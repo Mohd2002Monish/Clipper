@@ -2,6 +2,7 @@ import { connectMongo } from '../db';
 import { YouTubeCampaign, IYouTubeCampaignDocument } from '../../models/YouTubeCampaign';
 import { YouTubeVideoAnalytics } from '../../models/YouTubeVideoAnalytics';
 import { YouTubeUpload } from '../../models/YouTubeUpload';
+import { YouTubeAccount } from '../../models/YouTubeAccount';
 import { youtubeService } from './youtubeService';
 import { driveService } from './driveService';
 import { config } from '../config';
@@ -490,6 +491,131 @@ Respond ONLY with valid JSON in this exact structure:
     }
 
     return allVideos;
+  }
+
+  /**
+   * Directly syncs a YouTube channel's uploaded videos and live analytics into MongoDB.
+   * Useful when switching to a fresh database or refreshing channel statistics.
+   */
+  public async syncChannelUploadedVideos(channelIdFilter?: string): Promise<{
+    syncedVideos: number;
+    channelTitle: string;
+    subscriberCount: number;
+    totalViews: number;
+  }> {
+    await connectMongo();
+
+    let account = null;
+    if (channelIdFilter && channelIdFilter !== 'all') {
+      account = await YouTubeAccount.findOne({ channelId: channelIdFilter });
+    }
+    if (!account) {
+      account = await YouTubeAccount.findOne({ isActive: true });
+    }
+    if (!account) {
+      account = await YouTubeAccount.findOne();
+    }
+
+    if (!account) {
+      return { syncedVideos: 0, channelTitle: '', subscriberCount: 0, totalViews: 0 };
+    }
+
+    const youtube = await youtubeService.getYouTubeClientForChannel(account.channelId);
+
+    // 1. Fetch live channel details
+    const chRes = await youtube.channels.list({
+      mine: true,
+      part: ['contentDetails', 'statistics', 'snippet'],
+    });
+
+    const chItem = chRes.data.items?.[0];
+    let subscriberCount = account.subscriberCount || 0;
+    let totalViews = 0;
+
+    if (chItem?.statistics) {
+      subscriberCount = parseInt(chItem.statistics.subscriberCount || '0', 10);
+      totalViews = parseInt(chItem.statistics.viewCount || '0', 10);
+      account.subscriberCount = subscriberCount;
+      if (chItem.snippet?.title) account.channelTitle = chItem.snippet.title;
+      if (chItem.snippet?.thumbnails?.default?.url) {
+        account.channelAvatarUrl = chItem.snippet.thumbnails.default.url;
+      }
+      await account.save();
+    }
+
+    const uploadsPlaylistId = chItem?.contentDetails?.relatedPlaylists?.uploads;
+    if (!uploadsPlaylistId) {
+      return {
+        syncedVideos: 0,
+        channelTitle: account.channelTitle,
+        subscriberCount,
+        totalViews,
+      };
+    }
+
+    // 2. Fetch recent uploads from playlist
+    const plRes = await youtube.playlistItems.list({
+      playlistId: uploadsPlaylistId,
+      part: ['snippet'],
+      maxResults: 50,
+    });
+
+    const videoIds = (plRes.data.items || [])
+      .map((i) => i.snippet?.resourceId?.videoId)
+      .filter(Boolean) as string[];
+
+    if (videoIds.length === 0) {
+      return {
+        syncedVideos: 0,
+        channelTitle: account.channelTitle,
+        subscriberCount,
+        totalViews,
+      };
+    }
+
+    // 3. Batch query video statistics
+    let syncedVideos = 0;
+    const chunkSize = 50;
+    for (let i = 0; i < videoIds.length; i += chunkSize) {
+      const chunk = videoIds.slice(i, i + chunkSize);
+      const vRes = await youtube.videos.list({
+        id: chunk,
+        part: ['statistics', 'snippet'],
+      });
+
+      for (const v of vRes.data.items || []) {
+        if (!v.id) continue;
+        const uploadDate = v.snippet?.publishedAt ? new Date(v.snippet.publishedAt) : new Date();
+        const views = parseInt(v.statistics?.viewCount || '0', 10);
+        const likes = parseInt(v.statistics?.likeCount || '0', 10);
+        const comments = parseInt(v.statistics?.commentCount || '0', 10);
+
+        await YouTubeVideoAnalytics.findOneAndUpdate(
+          { videoId: v.id },
+          {
+            $set: {
+              channelId: account.channelId,
+              title: v.snippet?.title || 'YouTube Video',
+              uploadDate,
+              uploadHour: uploadDate.getHours(),
+              views,
+              likes,
+              comments,
+              syncedAt: new Date(),
+            },
+          },
+          { upsert: true, new: true }
+        );
+        syncedVideos++;
+      }
+    }
+
+    return {
+      syncedVideos,
+      channelTitle: account.channelTitle,
+      subscriberCount,
+      totalViews,
+    };
   }
 }
 

@@ -148,7 +148,7 @@ export function MediaLibraryView({ onSelectForOmniPost }: MediaLibraryViewProps)
               <Film className="w-5 h-5 text-[#2196F3]" />
             </span>
             <h2 className="text-xl font-bold text-slate-900 tracking-tight">
-              Unified Media Asset Library
+              Media Library
             </h2>
           </div>
           <p className="text-xs text-slate-500">
